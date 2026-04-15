@@ -10,7 +10,7 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const MONGO_URI = process.env.MONGODB_URI;
 const DB_NAME = 'interview_assistant';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CORS_ORIGINS = process.env.CORS_ORIGINS 

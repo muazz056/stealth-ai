@@ -1,6 +1,6 @@
 const { MongoClient, ObjectId } = require('mongodb');
 
-const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const MONGO_URI = process.env.MONGODB_URI;
 const DB_NAME = 'interview_assistant';
 
 let client = null;

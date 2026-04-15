@@ -1,6 +1,6 @@
 import { MongoClient, Db, ObjectId } from 'mongodb';
 
-const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const MONGO_URI = process.env.MONGODB_URI ;
 const DB_NAME = 'interview_assistant';
 
 let client: MongoClient | null = null;
@@ -30,7 +30,7 @@ export interface User {
 async function connectDB(): Promise<Db> {
   if (db) return db;
   try {
-    client = new MongoClient(MONGO_URI);
+    client = new MongoClient(process.env.MONGO_URI || '');
     await client.connect();
     db = client.db(DB_NAME);
     console.log('✅ Auth DB connected');
