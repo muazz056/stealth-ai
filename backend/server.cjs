@@ -1,0 +1,1691 @@
+const express = require('express');
+const cors = require('cors');
+const { MongoClient, ObjectId } = require('mongodb');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+
+// Load environment variables
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const DB_NAME = 'interview_assistant';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CORS_ORIGINS = process.env.CORS_ORIGINS 
+  ? process.env.CORS_ORIGINS.split(',') 
+  : ['http://localhost:5173', 'http://localhost:3001'];
+
+// Middleware
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or Electron)
+    if (!origin) return callback(null, true);
+    
+    if (CORS_ORIGINS.indexOf(origin) !== -1 || NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Multer configuration for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// Database connection
+let db = null;
+
+async function connectDB() {
+  if (db) return db;
+  try {
+    const client = new MongoClient(MONGO_URI);
+    await client.connect();
+    db = client.db(DB_NAME);
+    console.log('✅ Backend DB connected to MongoDB');
+    return db;
+  } catch (error) {
+    console.error('❌ Backend DB connection failed:', error);
+    throw error;
+  }
+}
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Interview Stealth Assist API is running' });
+});
+
+// Helper: Default shortcuts
+function getDefaultShortcuts() {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+  const primaryMod = isMac ? 'Cmd' : 'Ctrl';
+  
+  return {
+    startStopListen: { modifier: 'Ctrl', key: '\\' },
+    analyzeScreen: { modifier: 'Ctrl', key: ']' },
+    minimizeToggle: { modifier: 'Ctrl', key: '\'' },
+    focusQuestion: { modifier: 'Shift', key: '' },
+    clearQuestion: { modifier: 'Ctrl', key: 'Backspace' },
+    stopOrClear: { modifier: primaryMod, key: 'Backspace' }
+  };
+}
+
+// ==================== AUTH ROUTES ====================
+
+// Register
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { username, name, email, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
+
+    // Check if user exists
+    const existingUser = await users.findOne({
+      $or: [{ username }, { email }]
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Username or email already exists'
+      });
+    }
+
+    // Default base prompt for new users
+    const DEFAULT_BASE_PROMPT = `You are a real-time AI interview assistant (You are the person who is giving interview) built for live job interviews.
+
+TOP PRIORITIES:
+- Respond EXTREMELY FAST
+- Keep answers SHORT, CLEAR, and TO THE POINT
+- Optimize for quick reading on a small overlay
+
+CONTEXT RULES:
+1. Resume/CV = single source of truth
+   - Use ONLY mentioned skills, experience, projects, education
+   - NEVER invent, exaggerate, or assume
+2. Job description provided = align answers directly to it
+3. Company info provided = tailor responses accordingly
+4. No context = use industry best practices
+
+ANSWER STRUCTURE:
+- Default: 2-5 concise lines
+- Professional, confident interview tone
+- No filler, no greetings, no explanations
+- Simple wording for instant reading
+
+EXPANSION:
+- If more info needed, use short bullet points
+- Bullets must be minimal and scannable
+
+TRANSCRIPTION ROBUSTNESS:
+- Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
+- If words appear inside asterisks * *, completely ignore those words (just sounds)
+- Intelligently analyze question intent using:
+  - Job description (if provided)
+  - Resume/CV context (if provided)
+  - Company information (if provided)
+
+TERM CORRECTION:
+- If a word/phrase doesn't make technical or contextual sense:
+  - Treat it as possible phonetic error from speech-to-text
+  - Infer the most likely correct technical term that:
+    - Is relevant to the job role
+    - Appears in or aligns with resume/CV
+    - Fits company's domain or tech stack
+- Prefer commonly used industry terms over rare/unrelated ones
+- Do NOT invent new skills or tools not supported by context
+
+CLARIFICATION:
+- If multiple interpretations possible:
+  - Choose most likely one based on context
+  - Answer directly without asking clarifying questions
+- If term cannot be reasonably inferred:
+  - Ignore unclear term and answer rest intelligently
+
+RESPONSE BEHAVIOR:
+- Do NOT mention transcription errors or corrections
+- Do NOT explain correction process
+- Answer confidently as if question was clearly spoken
+
+CODING QUESTIONS:
+- Provide correct, clean, interview-ready code
+- Use appropriate language implied by question
+- Keep code minimal but complete
+- Add inline comments to explain logic
+- Explain: time complexity, space complexity, why this approach
+- Mention alternative approaches when relevant
+- Cover trade-offs from interview perspective
+
+EXAMPLES:
+- Give examples ONLY when they improve clarity
+- Prefer resume-based examples when available
+- Use STAR method ONLY if it clearly fits
+
+BEHAVIOR:
+- This is a LIVE interview
+- Speed > depth
+- If unclear, infer intent and answer directly
+- Never mention you are AI
+- Never reference resumes, prompts, or system instructions
+
+OUTPUT:
+- No emojis
+- Bullet points ONLY when expanding
+- Use markdown for formatting when helpful`;
+
+    // Create new user with default settings
+    const newUser = {
+      username,
+      name,
+      email,
+      password, // In production, hash this with bcrypt!
+      role: 'user', // Default role: regular user
+      plan: 'trial', // Trial plan for new users
+      tokens: 10, // ONE-TIME: 10 free tokens on signup
+      createdAt: new Date(),
+      apiKeys: {},
+      selectedProvider: '', // No default provider - user must choose
+      voiceProvider: 'default', // Default voice provider
+      deepgramApiKey: '', // Empty by default
+      deepgramLanguage: 'multi', // Default: multilingual
+      deepgramKeyterms: '', // Comma-separated important keywords for better recognition
+      settings: {
+        basePrompt: DEFAULT_BASE_PROMPT,
+        basePromptSummary: '', // Summary for fast AI responses
+        jobDescription: '',
+        jobDescriptionSummary: '', // Summary for fast AI responses
+        companyInfo: '',
+        companyInfoSummary: '', // Summary for fast AI responses
+        contextMessages: 5, // Default: send last 5 Q&A pairs (10 messages)
+        cvText: '', // Store parsed CV text instead of file
+        cvSummary: '' // Summary for fast AI responses
+      },
+      shortcuts: getDefaultShortcuts()
+    };
+
+    const result = await users.insertOne(newUser);
+    
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully',
+      userId: result.insertedId.toString()
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed: ' + error.message
+    });
+  }
+});
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
+
+    const user = await users.findOne({ username, password });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password'
+      });
+    }
+
+    // Remove password from response
+    const { password: _, ...userWithoutPassword } = user;
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Login failed: ' + error.message
+    });
+  }
+});
+
+// Update API Key
+app.put('/api/auth/api-key', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, provider, apiKey } = req.body;
+
+    if (!userId || !provider || !apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId, provider, and apiKey are required'
+      });
+    }
+
+    console.log('🔐 Updating API key for user:', userId);
+    console.log('📡 Provider:', provider);
+    console.log('🔑 API Key (first 10 chars):', apiKey.substring(0, 10) + '...');
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      {
+        $set: {
+          [`apiKeys.${provider}`]: apiKey,
+          selectedProvider: provider
+        }
+      }
+    );
+
+    console.log('✅ MongoDB update result:', result);
+    console.log('📊 Matched:', result.matchedCount, 'Modified:', result.modifiedCount);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Fetch updated user to verify
+    const updatedUser = await users.findOne({ _id: new ObjectId(userId) });
+    console.log('🔍 Verification - Updated user apiKeys:', updatedUser?.apiKeys);
+
+    res.json({
+      success: true,
+      message: 'API key updated successfully',
+      apiKeys: updatedUser?.apiKeys || {}
+    });
+  } catch (error) {
+    console.error('❌ Update API key error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update API key: ' + error.message
+    });
+  }
+});
+
+// Get User by ID
+app.get('/api/auth/user/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Remove password from response
+    const { password: _, ...userWithoutPassword } = user;
+
+    res.json({
+      success: true,
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user: ' + error.message
+    });
+  }
+});
+
+// ==================== CV PARSING ROUTE ====================
+
+// Parse CV and extract text
+app.post('/api/cv/parse', upload.single('cv'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    const { buffer, mimetype, originalname } = req.file;
+    let extractedText = '';
+
+    // Parse based on file type
+    if (mimetype === 'application/pdf') {
+      // Parse PDF
+      const pdfData = await pdfParse(buffer);
+      extractedText = pdfData.text;
+    } else if (
+      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimetype === 'application/msword'
+    ) {
+      // Parse DOCX/DOC
+      const result = await mammoth.extractRawText({ buffer });
+      extractedText = result.value;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Unsupported file type. Please upload PDF or DOC/DOCX files.'
+      });
+    }
+
+    // Clean up the text
+    extractedText = extractedText
+      .replace(/\r\n/g, '\n')  // Normalize line breaks
+      .replace(/\n{3,}/g, '\n\n')  // Remove excessive line breaks
+      .trim();
+
+    if (!extractedText || extractedText.length < 50) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not extract meaningful text from the CV. Please check the file.'
+      });
+    }
+
+    res.json({
+      success: true,
+      text: extractedText,
+      filename: originalname,
+      length: extractedText.length
+    });
+
+  } catch (error) {
+    console.error('❌ CV parsing error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to parse CV: ' + error.message
+    });
+  }
+});
+
+// Update Settings
+app.put('/api/auth/settings', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, settings } = req.body;
+
+    if (!userId || !settings) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and settings are required'
+      });
+    }
+
+    console.log('⚙️ Updating user settings for:', userId);
+    console.log('📝 Settings:', settings);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { settings } }
+    );
+
+    console.log('✅ Settings update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify the update by fetching the user
+    const updatedUser = await users.findOne({ _id: new ObjectId(userId) });
+    console.log('🔍 Verification - Updated user settings:', updatedUser?.settings);
+
+    res.json({
+      success: true,
+      message: 'Settings updated successfully',
+      settings: updatedUser?.settings || settings
+    });
+  } catch (error) {
+    console.error('Update settings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update settings: ' + error.message
+    });
+  }
+});
+
+// Update Shortcuts
+app.put('/api/auth/shortcuts', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, shortcuts } = req.body;
+
+    if (!userId || !shortcuts) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and shortcuts are required'
+      });
+    }
+
+    console.log('⌨️ Updating user shortcuts for:', userId);
+    console.log('🎹 Shortcuts:', shortcuts);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { shortcuts } }
+    );
+
+    console.log('✅ Shortcuts update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Shortcuts updated successfully',
+      shortcuts: shortcuts
+    });
+  } catch (error) {
+    console.error('Update shortcuts error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update shortcuts: ' + error.message
+    });
+  }
+});
+
+// Update Selected Provider (without requiring API key)
+app.put('/api/auth/provider', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, provider } = req.body;
+
+    if (!userId || !provider) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and provider are required'
+      });
+    }
+
+    console.log('🔄 Updating selected provider for user:', userId);
+    console.log('📡 Provider:', provider);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { selectedProvider: provider } }
+    );
+
+    console.log('✅ Provider update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Provider updated successfully',
+      selectedProvider: provider
+    });
+  } catch (error) {
+    console.error('Update provider error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update provider: ' + error.message
+    });
+  }
+});
+
+// Update Voice Provider
+app.put('/api/auth/voice-provider', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, voiceProvider } = req.body;
+
+    if (!userId || !voiceProvider) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and voiceProvider are required'
+      });
+    }
+
+    console.log('🔄 Updating voice provider for user:', userId);
+    console.log('🎤 Voice Provider:', voiceProvider);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { voiceProvider: voiceProvider } }
+    );
+
+    console.log('✅ Voice provider update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Voice provider updated successfully',
+      voiceProvider: voiceProvider
+    });
+  } catch (error) {
+    console.error('Update voice provider error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update voice provider: ' + error.message
+    });
+  }
+});
+
+// Update Deepgram API Key
+app.put('/api/auth/deepgram-key', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, deepgramApiKey } = req.body;
+
+    if (!userId || !deepgramApiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and deepgramApiKey are required'
+      });
+    }
+
+    console.log('🔄 Updating Deepgram API key for user:', userId);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { deepgramApiKey: deepgramApiKey } }
+    );
+
+    console.log('✅ Deepgram key update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Deepgram API key updated successfully'
+    });
+  } catch (error) {
+    console.error('Update Deepgram key error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update Deepgram key: ' + error.message
+    });
+  }
+});
+
+// Update Deepgram Language
+app.put('/api/auth/deepgram-language', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, deepgramLanguage } = req.body;
+
+    if (!userId || !deepgramLanguage) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and deepgramLanguage are required'
+      });
+    }
+
+    console.log('🔄 Updating Deepgram language for user:', userId);
+    console.log('🌍 Language:', deepgramLanguage);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { deepgramLanguage: deepgramLanguage } }
+    );
+
+    console.log('✅ Deepgram language update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Deepgram language updated successfully',
+      deepgramLanguage: deepgramLanguage
+    });
+  } catch (error) {
+    console.error('Update Deepgram language error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update Deepgram language: ' + error.message
+    });
+  }
+});
+
+// Update Deepgram Keyterms
+app.put('/api/auth/deepgram-keyterms', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, deepgramKeyterms } = req.body;
+
+    if (!userId || deepgramKeyterms === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and deepgramKeyterms are required'
+      });
+    }
+
+    console.log('🔄 Updating Deepgram keyterms for user:', userId);
+    console.log('🔑 Keyterms:', deepgramKeyterms);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { deepgramKeyterms: deepgramKeyterms } }
+    );
+
+    console.log('✅ Deepgram keyterms update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Deepgram keyterms updated successfully',
+      deepgramKeyterms: deepgramKeyterms
+    });
+  } catch (error) {
+    console.error('Update Deepgram keyterms error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update Deepgram keyterms: ' + error.message
+    });
+  }
+});
+
+// ==================== MESSAGE/CONVERSATION ROUTES ====================
+
+// Save conversation message
+app.post('/api/messages/save', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const messages = database.collection('messages');
+    
+    const { userId, message } = req.body;
+
+    if (!userId || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and message are required'
+      });
+    }
+
+    // Message should contain: role, parts, timestamp
+    const messageDoc = {
+      userId: new ObjectId(userId),
+      ...message,
+      savedAt: new Date()
+    };
+
+    await messages.insertOne(messageDoc);
+
+    res.json({
+      success: true,
+      message: 'Message saved successfully'
+    });
+  } catch (error) {
+    console.error('Save message error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save message: ' + error.message
+    });
+  }
+});
+
+// Save conversation history (bulk)
+app.post('/api/messages/save-history', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const messages = database.collection('messages');
+    
+    const { userId, history } = req.body;
+
+    if (!userId || !history || !Array.isArray(history)) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and history array are required'
+      });
+    }
+
+    // Clear existing history for this user
+    await messages.deleteMany({ userId: new ObjectId(userId) });
+
+    // Insert new history
+    if (history.length > 0) {
+      const messageDocs = history.map(msg => ({
+        userId: new ObjectId(userId),
+        ...msg,
+        savedAt: new Date()
+      }));
+
+      await messages.insertMany(messageDocs);
+    }
+
+    res.json({
+      success: true,
+      message: 'Conversation history saved successfully',
+      count: history.length
+    });
+  } catch (error) {
+    console.error('Save history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save history: ' + error.message
+    });
+  }
+});
+
+// Get conversation history
+app.get('/api/messages/history/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const messages = database.collection('messages');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const history = await messages
+      .find({ userId: new ObjectId(userId) })
+      .sort({ savedAt: 1 })
+      .toArray();
+
+    // Remove MongoDB-specific fields
+    const cleanHistory = history.map(({ _id, userId, savedAt, ...msg }) => msg);
+
+    res.json({
+      success: true,
+      history: cleanHistory,
+      count: cleanHistory.length
+    });
+  } catch (error) {
+    console.error('Get history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get history: ' + error.message
+    });
+  }
+});
+
+// Clear conversation history
+app.delete('/api/messages/clear/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const messages = database.collection('messages');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const result = await messages.deleteMany({ userId: new ObjectId(userId) });
+
+    res.json({
+      success: true,
+      message: 'Conversation history cleared',
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Clear history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear history: ' + error.message
+    });
+  }
+});
+
+// ==================== TOKEN MANAGEMENT ====================
+
+// Check user tokens
+app.get('/api/tokens/check/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const isAdmin = user.role === 'admin';
+    const hasUnlimitedTokens = isAdmin || user.tokens === -1;
+    const canSendMessage = hasUnlimitedTokens || user.tokens > 0;
+
+    res.json({
+      success: true,
+      tokens: user.tokens,
+      canSendMessage,
+      isAdmin,
+      hasUnlimitedTokens,
+      role: user.role,
+      plan: user.plan
+    });
+  } catch (error) {
+    console.error('Check tokens error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check tokens: ' + error.message
+    });
+  }
+});
+
+// Consume tokens (1 token per question)
+app.post('/api/tokens/consume/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+    const { amount = 1 } = req.body; // Default 1 token per question
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Don't consume tokens for admin or unlimited users
+    const isAdmin = user.role === 'admin';
+    const hasUnlimitedTokens = isAdmin || user.tokens === -1;
+    
+    if (hasUnlimitedTokens) {
+      return res.json({
+        success: true,
+        message: 'Unlimited tokens',
+        tokens: user.tokens,
+        consumed: 0
+      });
+    }
+
+    // Check if user has enough tokens
+    if (user.tokens < amount) {
+      return res.status(403).json({
+        success: false,
+        message: 'Insufficient tokens',
+        tokens: user.tokens
+      });
+    }
+
+    // Consume tokens
+    await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $inc: { tokens: -amount } }
+    );
+
+    res.json({
+      success: true,
+      message: 'Tokens consumed',
+      tokens: user.tokens - amount,
+      consumed: amount
+    });
+  } catch (error) {
+    console.error('Consume tokens error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to consume tokens: ' + error.message
+    });
+  }
+});
+
+// ==================== MESSAGE LIMIT & TRACKING (LEGACY - KEPT FOR COMPATIBILITY) ====================
+
+// Check if user can send message (trial limit)
+app.get('/api/messages/check-limit/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const isAdmin = user.role === 'admin' || user.plan === 'lifetime';
+    const hasUnlimitedAccess = user.messageLimit === -1 || isAdmin;
+    const canSendMessage = hasUnlimitedAccess || user.messagesUsed < user.messageLimit;
+    const remainingMessages = hasUnlimitedAccess ? -1 : Math.max(0, user.messageLimit - user.messagesUsed);
+
+    res.json({
+      success: true,
+      canSendMessage,
+      isAdmin,
+      plan: user.plan,
+      messageLimit: user.messageLimit,
+      messagesUsed: user.messagesUsed,
+      remainingMessages,
+      hasUnlimitedAccess
+    });
+  } catch (error) {
+    console.error('Check limit error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check limit: ' + error.message
+    });
+  }
+});
+
+// Increment message usage
+app.post('/api/messages/increment-usage/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Don't increment for admin or unlimited users
+    const isAdmin = user.role === 'admin' || user.plan === 'lifetime';
+    if (!isAdmin && user.messageLimit !== -1) {
+      await users.updateOne(
+        { _id: new ObjectId(userId) },
+        { $inc: { messagesUsed: 1 } }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Usage incremented',
+      messagesUsed: isAdmin ? user.messagesUsed : user.messagesUsed + 1
+    });
+  } catch (error) {
+    console.error('Increment usage error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to increment usage: ' + error.message
+    });
+  }
+});
+
+// Reset message usage (on new session)
+app.post('/api/messages/reset-usage/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { messagesUsed: 0 } }
+    );
+
+    res.json({
+      success: true,
+      message: 'Usage reset successfully'
+    });
+  } catch (error) {
+    console.error('Reset usage error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset usage: ' + error.message
+    });
+  }
+});
+
+// ==================== SUMMARIZATION ROUTE ====================
+
+// Summarize CV, Job Description, Company Info, or Base Prompt
+app.post('/api/summarize', async (req, res) => {
+  try {
+    console.log('📝 Summarize request received:', {
+      type: req.body.type,
+      textLength: req.body.text?.length,
+      provider: req.body.apiProvider,
+      hasApiKey: !!req.body.apiKey
+    });
+    
+    const { type, text, apiProvider, apiKey } = req.body;
+    
+    if (!type || !text || !apiProvider) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: type, text, apiProvider'
+      });
+    }
+
+    // Build summary prompt based on type
+    let summaryPrompt = '';
+    if (type === 'cv') {
+      summaryPrompt = `Summarize this resume into:
+- Core skills (technologies, languages, frameworks)
+- Key experience highlights (years, domains)
+- Notable projects or achievements
+- Education highlights
+
+Keep response under 200 tokens. Be concise and factual.
+
+Resume:
+${text}`;
+    } else if (type === 'jd') {
+      summaryPrompt = `Extract from this job description:
+- Required technical skills
+- Key responsibilities
+- Interview focus areas (technical, behavioral, system design)
+
+Keep response under 150 tokens. Be concise and factual.
+
+Job Description:
+${text}`;
+    } else if (type === 'company') {
+      summaryPrompt = `Summarize this company information:
+- Company domain/industry
+- Key products or services
+- Company culture highlights
+- Notable achievements
+
+Keep response under 100 tokens. Be concise and factual.
+
+Company Information:
+${text}`;
+    } else if (type === 'basePrompt') {
+      summaryPrompt = `Summarize this interview assistant instruction into key directives:
+- Main goal/purpose
+- Key behavioral instructions
+- Response style requirements
+- Important constraints
+
+Keep response under 150 tokens. Be concise and factual.
+
+Instructions:
+${text}`;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid type. Must be: cv, jd, company, or basePrompt'
+      });
+    }
+
+    let summary = '';
+
+    // Call AI based on provider
+    if (apiProvider === 'gemini') {
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'API key required for Gemini'
+        });
+      }
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [{ text: summaryPrompt }]
+            }]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Gemini API error: ${response.status} - ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      summary = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    } else if (apiProvider === 'openai') {
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'API key required for OpenAI'
+        });
+      }
+
+      const response = await fetch(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: 'You are a professional resume and job description summarizer.' },
+              { role: 'user', content: summaryPrompt }
+            ]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`OpenAI API error: ${response.status} - ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      summary = data.choices?.[0]?.message?.content || '';
+
+    } else if (apiProvider === 'claude') {
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'API key required for Claude'
+        });
+      }
+
+      const response = await fetch(
+        'https://api.anthropic.com/v1/messages',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 300,
+            messages: [
+              { role: 'user', content: summaryPrompt }
+            ]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Claude API error: ${response.status} - ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      summary = data.content?.[0]?.text || '';
+
+    } else if (apiProvider === 'groq') {
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'API key required for Groq'
+        });
+      }
+
+      const response = await fetch(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            messages: [
+              { role: 'system', content: 'You are a professional interview assistant.' },
+              { role: 'user', content: summaryPrompt }
+            ]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Groq API error response:', errorData);
+        throw new Error(`Groq API error: ${response.status} - ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      summary = data.choices?.[0]?.message?.content || '';
+      console.log('✅ Groq summary generated, length:', summary.length);
+
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid API provider. Must be: gemini, openai, claude, or groq'
+      });
+    }
+
+    res.json({
+      success: true,
+      summary: summary.trim()
+    });
+    
+    console.log('✅ Summarization complete, summary length:', summary.trim().length);
+
+  } catch (error) {
+    console.error('❌ Summarization error:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to summarize: ' + error.message
+    });
+  }
+});
+
+// ==================== STREAMING AI GENERATION ====================
+
+// Stream AI response using Server-Sent Events
+app.post('/api/generate-stream', async (req, res) => {
+  console.log('📡 Streaming generation request received');
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.flushHeaders();
+
+  try {
+    const { messages, apiProvider, apiKey, model } = req.body;
+
+    if (!messages || !apiProvider || !apiKey) {
+      res.write(`data: ${JSON.stringify({ error: 'Missing required fields: messages, apiProvider, apiKey' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+
+    console.log(`🤖 Streaming with provider: ${apiProvider}`);
+
+    // --- GEMINI STREAMING ---
+    if (apiProvider === 'gemini') {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: messages })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        res.write(`data: ${JSON.stringify({ error: `Gemini API error: ${response.status} - ${errorData}` })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+
+      // Stream Gemini response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6);
+            if (jsonStr === '[DONE]') continue;
+            try {
+              const data = JSON.parse(jsonStr);
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+    // --- OPENAI STREAMING ---
+    } else if (apiProvider === 'openai') {
+      const response = await fetch(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model || 'gpt-4o-mini',
+            messages: messages,
+            stream: true,
+            max_tokens: 4000
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        res.write(`data: ${JSON.stringify({ error: `OpenAI API error: ${response.status} - ${errorData}` })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+
+      // Stream OpenAI response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') continue;
+            if (!jsonStr) continue;
+            try {
+              const data = JSON.parse(jsonStr);
+              const text = data.choices?.[0]?.delta?.content || '';
+              if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+    // --- CLAUDE STREAMING ---
+    } else if (apiProvider === 'claude') {
+      const response = await fetch(
+        'https://api.anthropic.com/v1/messages',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: model || 'claude-3-5-sonnet-20241022',
+            max_tokens: 4000,
+            messages: messages,
+            stream: true
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        res.write(`data: ${JSON.stringify({ error: `Claude API error: ${response.status} - ${errorData}` })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+
+      // Stream Claude response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              const data = JSON.parse(jsonStr);
+              // Claude sends content_block_delta events with text
+              if (data.type === 'content_block_delta' && data.delta?.text) {
+                res.write(`data: ${JSON.stringify({ text: data.delta.text })}\n\n`);
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+    // --- GROQ STREAMING ---
+    } else if (apiProvider === 'groq') {
+      const response = await fetch(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model || 'meta-llama/llama-4-scout-17b-16e-instruct',
+            messages: messages,
+            stream: true,
+            max_tokens: 4000
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        res.write(`data: ${JSON.stringify({ error: `Groq API error: ${response.status} - ${errorData}` })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+
+      // Stream Groq response (OpenAI-compatible format)
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') continue;
+            if (!jsonStr) continue;
+            try {
+              const data = JSON.parse(jsonStr);
+              const text = data.choices?.[0]?.delta?.content || '';
+              if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+    } else {
+      res.write(`data: ${JSON.stringify({ error: 'Invalid API provider' })}\n\n`);
+    }
+
+    // Send done signal
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+  } catch (error) {
+    console.error('❌ Streaming error:', error);
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error'
+  });
+});
+
+// Start server
+async function startServer() {
+  try {
+    await connectDB();
+    app.listen(PORT, () => {
+      console.log('');
+      console.log('┌─────────────────────────────────────────────────┐');
+      console.log('│  🚀 Interview Stealth Assist Backend Server   │');
+      console.log('├─────────────────────────────────────────────────┤');
+      console.log(`│  📡 API Server: http://localhost:${PORT}        │`);
+      console.log('│  ✅ MongoDB: Connected                          │');
+      console.log('│  🌐 CORS: Enabled                               │');
+      console.log('└─────────────────────────────────────────────────┘');
+      console.log('');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
+
+module.exports = app;
+

@@ -1,0 +1,7 @@
+{
+  "name": "Interview Stealth Assist",
+  "description": "A high-tech, real-time AI assistant for job interviews. Provides live transcriptions, resume-based AI answers, and a stealth overlay designed to be invisible to screen-sharing software.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
