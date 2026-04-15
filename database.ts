@@ -1,7 +1,7 @@
+require('dotenv').config();
 import { MongoClient, Db, Collection } from 'mongodb';
-
 // MongoDB connection URI - can be set via environment variable or config
-const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const MONGO_URI = process.env.MONGODB_URI;
 const DB_NAME = 'interview_assistant';
 const COLLECTION_NAME = 'chat_history';
 
@@ -20,7 +20,7 @@ export async function connectDB(): Promise<Db> {
   if (db) return db;
 
   try {
-    client = new MongoClient(MONGO_URI);
+    client = new MongoClient(process.env.MONGO_URI || '');
     await client.connect();
     db = client.db(DB_NAME);
     console.log('✅ MongoDB connected successfully');
