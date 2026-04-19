@@ -45,6 +45,8 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(env.VITE_DOWNLOAD_WINDOWS || ''),
         'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(env.VITE_DOWNLOAD_MAC || ''),
         'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(env.VITE_DOWNLOAD_LINUX || ''),
+        'import.meta.env.VITE_BACKEND_URL': JSON.stringify(env.API_BACKEND_URL || 'http://localhost:3001'),
+        'import.meta.env.VITE_API_URL': JSON.stringify((env.API_BACKEND_URL || 'http://localhost:3001') + '/api'),
       },
       resolve: {
         alias: {
