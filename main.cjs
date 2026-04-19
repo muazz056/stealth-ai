@@ -4,6 +4,13 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Determine correct backend URL for packaged app
+const DEPLOYED_BACKEND = 'https://stealth-ai-production-e686.up.railway.app';
+const BACKEND_URL = process.env.API_BACKEND_URL || (app.isPackaged ? DEPLOYED_BACKEND : 'http://localhost:3001');
+
+console.log('🔧 Backend URL:', BACKEND_URL);
+console.log('🔧 Is packaged:', app.isPackaged);
+
 // Suppress Electron's default error dialogs for uncaught exceptions
 process.on('uncaughtException', (error) => {
     // Only show console errors, not dialogs
@@ -529,7 +536,6 @@ function loadAuthModule() {
 }
 
 // Backend API URL - use env var or Railway URL for production
-const BACKEND_URL = process.env.BACKEND_URL || process.env.API_BACKEND_URL || 'http://localhost:3001';
 
 // IPC Handlers for Authentication
 ipcMain.handle('auth-register', async (event, userData) => {
@@ -810,38 +816,52 @@ function createMainWindow() {
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
     
     if (app.isPackaged) {
-      // Try multiple paths for dist folder (handles both installer and portable)
-      let possiblePaths = [
+      // Build all possible paths
+      const exeDir = path.dirname(app.getPath('exe'));
+      const appPath = app.getAppPath();
+      
+      console.log('========== PATH DEBUG ==========');
+      console.log('__dirname:', __dirname);
+      console.log('resourcesPath:', process.resourcesPath);
+      console.log('exe path:', app.getPath('exe'));
+      console.log('exeDir:', exeDir);
+      console.log('appPath:', appPath);
+      console.log('app.isPackaged:', app.isPackaged);
+      console.log('====================================');
+      
+      // Try many paths
+      const possiblePaths = [
+        // Installer paths
         path.join(__dirname, 'dist', 'index.html'),
         path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
         path.join(process.resourcesPath, 'dist', 'index.html'),
-        path.join(app.getAppPath(), 'dist', 'index.html'),
-        path.join(path.dirname(app.getPath('exe')), 'resources', 'app', 'dist', 'index.html'),
+        // Portable paths (exe in win-unpacked)
+        path.join(exeDir, 'resources', 'app', 'dist', 'index.html'),
+        path.join(exeDir, 'app', 'dist', 'index.html'),
+        // Extra paths
+        path.join(appPath, 'dist', 'index.html'),
+        path.join(exeDir, 'dist', 'index.html'),
       ];
       
-      // For portable exe, it runs from different location
-      if (process.resourcesPath.includes('app-')) {
-        possiblePaths = [
-          path.join(__dirname, 'dist', 'index.html'),
-          path.join(path.dirname(app.getPath('exe')), 'resources', 'app', 'dist', 'index.html'),
-          path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
-        ];
-      }
-      
       let indexPath = possiblePaths[0];
+      let found = false;
+      
       for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
+        const exists = fs.existsSync(p);
+        console.log('Checking:', p, exists ? '✅ EXISTS' : '❌ NOT FOUND');
+        if (exists && !found) {
           indexPath = p;
-          console.log('✅ Found index.html at:', p);
-          break;
+          found = true;
         }
       }
       
-      console.log('📂 Loading main window from:', indexPath);
-      console.log('📂 __dirname:', __dirname);
-      console.log('📂 resourcesPath:', process.resourcesPath);
-      console.log('📂 exe path:', app.getPath('exe'));
+      if (!found) {
+        // Last resort fallback
+        indexPath = path.join(__dirname, 'dist', 'index.html');
+        console.log('⚠️ Using fallback path:', indexPath);
+      }
       
+      console.log('📂 FINAL Loading from:', indexPath);
       mainWindow.loadFile(indexPath, { hash: '/service' });
     } else {
       mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
