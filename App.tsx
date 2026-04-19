@@ -1260,8 +1260,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         
-        const url = buildDeepgramUrl(deepgramLanguage, deepgramKeyterms);
-        const ws = new WebSocket(url, ['token', deepgramApiKey]);
+        const url = buildDeepgramUrl(deepgramLanguage, deepgramKeyterms, deepgramApiKey);
+        const ws = new WebSocket(url);
         deepgramWsRef.current = ws;
         
         ws.onopen = () => {
