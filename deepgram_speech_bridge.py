@@ -191,6 +191,8 @@ async def start_deepgram():
         "Authorization": f"Token {api_key}"
     }
     
+    send_status(f"Connecting to Deepgram (key length: {len(api_key)})")
+    
     try:
         async with websockets.connect(url, additional_headers=headers) as ws:
             ws_connection = ws
@@ -260,7 +262,7 @@ def handle_command(command):
         cmd_type = command.get("command")
         
         if cmd_type == "init":
-            api_key = command.get("apiKey")
+            api_key = command.get("apiKey", "").strip() if command.get("apiKey") else ""
             lang = command.get("language")
             kw = command.get("keyterms", "")
             if lang:

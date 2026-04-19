@@ -1436,6 +1436,8 @@ ${text}`;
 // Stream AI response using Server-Sent Events
 app.post('/api/generate-stream', async (req, res) => {
   console.log('📡 Streaming generation request received');
+  console.log('📡 Origin:', req.headers.origin);
+  console.log('📡 API Provider:', req.body.apiProvider);
   
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1448,6 +1450,7 @@ app.post('/api/generate-stream', async (req, res) => {
     const { messages, apiProvider, apiKey, model } = req.body;
 
     if (!messages || !apiProvider || !apiKey) {
+      console.log('❌ Missing required fields');
       res.write(`data: ${JSON.stringify({ error: 'Missing required fields: messages, apiProvider, apiKey' })}\n\n`);
       res.write('data: [DONE]\n\n');
       return res.end();
