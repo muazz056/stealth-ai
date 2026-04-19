@@ -106,9 +106,8 @@ const ENGLISH_LANG_CODES = ['en', 'en-US', 'en-GB', 'en-AU', 'en-IN', 'en-NZ', '
 
 function buildDeepgramUrl(langCode: string, keyterms: string = '', apiKey: string = '') {
   const isEnglish = ENGLISH_LANG_CODES.includes(langCode);
-  // Add encoding for browser audio (Opus vs raw PCM)
-  // IMPORTANT: Deepgram WebSocket uses query param auth, NOT protocol headers!
-  let url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${langCode}&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000&authorization=token%20${encodeURIComponent(apiKey)}`;
+  // Use capital Token - matching HTTP header format!
+  let url = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${langCode}&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000&authorization=Token%20${apiKey}`;
   
   if (isEnglish) {
     // Full features for English / Multilingual
@@ -1250,71 +1249,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       setIsListening(true);
       console.log('🐍 Started Python speech recognition (real-time, free!)');
       
-    } else if (!isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
-      // Browser + Deepgram: Use WebSocket directly from browser
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        deepgramAudioRef.current = stream;
-        
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        
-        const url = buildDeepgramUrl(deepgramLanguage, deepgramKeyterms, deepgramApiKey);
-        const ws = new WebSocket(url);
-        deepgramWsRef.current = ws;
-        
-        ws.onopen = () => {
-          console.log('🎤 Deepgram WebSocket connected (browser)');
-          mediaRecorder.start(250); // Send audio every 250ms
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type !== 'Results') return;
-            const channel = data.channel;
-            if (!channel || !channel.alternatives) return;
-            const transcript = channel.alternatives[0]?.transcript || '';
-            if (transcript) {
-              if (data.is_final) {
-                // Final: commit text permanently, clear interim
-                console.log('📝 [Browser Deepgram] FINAL:', transcript);
-                setCommittedText(prev => (prev + ' ' + transcript).trim());
-                setInterimText('');
-              } else {
-                // Interim: replace current interim (same utterance evolving)
-                console.log('📝 [Browser Deepgram] INTERIM:', transcript);
-                setInterimText(transcript);
-              }
-            }
-          } catch (e) {
-            // Skip non-JSON messages
-          }
-        };
-        
-        ws.onerror = (e) => {
-          console.error('❌ Deepgram WebSocket error:', e);
-        };
-        
-        ws.onclose = () => {
-          console.log('🔌 Deepgram WebSocket closed (browser)');
-        };
-        
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            ws.send(event.data);
-          }
-        };
-        
-        mediaRecorderRef.current = mediaRecorder;
-        setIsListening(true);
-        console.log('🎤 Started Deepgram speech recognition (browser WebSocket)');
-        
-      } catch (e) {
-        console.error('Failed to start Deepgram browser:', e);
-        setIsListening(false);
-      }
-      
-    } else if (recognitionRef.current) {
+} else if (recognitionRef.current) {
       // Browser: Use Web Speech API (fallback/default)
       try { 
         recognitionRef.current.start();
