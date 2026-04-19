@@ -1,8 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Footer from '../components/Footer';
+import { APP_CONFIG } from '../src/config';
 
 const LandingPage: React.FC = () => {
+  const isElectron = typeof window !== 'undefined' && (window as any).require;
+  const showDownload = !isElectron && APP_CONFIG.DOWNLOAD_WINDOWS;
+  
   return (
     <div className="min-h-screen bg-white dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-colors duration-300">
       {/* Hero Section */}
@@ -124,7 +128,8 @@ const LandingPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Download Section */}
+      {/* Download Section - Only show on Vite/Web, not Electron */}
+      {showDownload && (
       <div id="download" className="bg-slate-50 dark:bg-slate-900/50 py-20 md:py-32">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
@@ -161,6 +166,7 @@ const LandingPage: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
       
       <Footer />
     </div>
@@ -193,29 +199,50 @@ interface DownloadCardProps {
   comingSoon: boolean;
 }
 
-const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, size, comingSoon }) => (
-  <div className="bg-white dark:bg-slate-800/30 backdrop-blur-sm border border-slate-200 dark:border-slate-700/50 rounded-2xl p-6 md:p-8 hover:border-blue-500/50 transition-all hover:scale-105 transform">
-    <div className="text-5xl mb-4 text-center">{icon}</div>
-    <h3 className="text-2xl font-black text-black dark:text-white mb-2 text-center">{platform}</h3>
-    <p className="text-slate-700 dark:text-gray-100 text-sm mb-1 text-center">{version}</p>
-    <p className="text-slate-600 dark:text-gray-200 text-xs mb-6 text-center">{size}</p>
-    
-    {comingSoon ? (
-      <button
-        disabled
-        className="w-full px-6 py-3 bg-slate-300 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 rounded-xl font-bold cursor-not-allowed"
-      >
-        Coming Soon
-      </button>
-    ) : (
-      <a
-        href="#"
-        className="block w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl"
-      >
-        Download
-      </a>
-    )}
-  </div>
-);
+const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, size, comingSoon }) => {
+  // Get download URL based on platform
+  const getDownloadUrl = () => {
+    if (platform.toLowerCase().includes('windows')) {
+      return APP_CONFIG.DOWNLOAD_WINDOWS;
+    }
+    if (platform.toLowerCase().includes('mac')) {
+      return APP_CONFIG.DOWNLOAD_MAC;
+    }
+    if (platform.toLowerCase().includes('linux')) {
+      return APP_CONFIG.DOWNLOAD_LINUX;
+    }
+    return '';
+  };
+  
+  const downloadUrl = getDownloadUrl();
+  const isAvailable = !comingSoon && downloadUrl;
+  
+  return (
+    <div className="bg-white dark:bg-slate-800/30 backdrop-blur-sm border border-slate-200 dark:border-slate-700/50 rounded-2xl p-6 md:p-8 hover:border-blue-500/50 transition-all hover:scale-105 transform">
+      <div className="text-5xl mb-4 text-center">{icon}</div>
+      <h3 className="text-2xl font-black text-black dark:text-white mb-2 text-center">{platform}</h3>
+      <p className="text-slate-700 dark:text-gray-100 text-sm mb-1 text-center">{version}</p>
+      <p className="text-slate-600 dark:text-gray-200 text-xs mb-6 text-center">{size}</p>
+      
+      {!isAvailable ? (
+        <button
+          disabled
+          className="w-full px-6 py-3 bg-slate-300 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 rounded-xl font-bold cursor-not-allowed"
+        >
+          Coming Soon
+        </button>
+      ) : (
+        <a
+          href={downloadUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl"
+        >
+          Download
+        </a>
+      )}
+    </div>
+  );
+};
 
 export default LandingPage;

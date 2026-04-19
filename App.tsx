@@ -195,10 +195,6 @@ CONTEXT RULES:
 
 ANSWER STRUCTURE:
 - Professional, confident tone
-- Simple wording.
-
-EXPANSION:
-- If more info needed, use bullet points
 
 TRANSCRIPTION ROBUSTNESS:
 - Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
@@ -238,7 +234,6 @@ BEHAVIOR:
 
 OUTPUT:
 - No emojis
-- Bullet points ONLY when expanding
 - Use markdown for formatting when helpful`;
 
 const LS_BASE_PROMPT_KEY = 'isa_base_prompt';

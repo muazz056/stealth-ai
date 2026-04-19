@@ -528,8 +528,8 @@ function loadAuthModule() {
     }
 }
 
-// Backend API URL
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
+// Backend API URL - use env var or Railway URL for production
+const BACKEND_URL = process.env.BACKEND_URL || process.env.API_BACKEND_URL || 'http://localhost:3001';
 
 // IPC Handlers for Authentication
 ipcMain.handle('auth-register', async (event, userData) => {
@@ -808,7 +808,15 @@ function createMainWindow() {
     
     // Load main setup page - go directly to app (not landing page)
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
-    mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
+    
+    if (app.isPackaged) {
+      // Load from local dist folder
+      const indexPath = path.join(__dirname, 'dist', 'index.html');
+      console.log('📂 Loading frontend from:', indexPath);
+      mainWindow.loadFile(indexPath, { hash: '/service' });
+    } else {
+      mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
+    }
     
     // Add error handling
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
@@ -1086,9 +1094,15 @@ function createOverlayWindow() {
         }
     });
     
-    // Load overlay page directly
+    // Load overlay page
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
-    overlay.loadURL(`${FRONTEND_URL}/#/overlay`);
+    
+    if (app.isPackaged) {
+      const indexPath = path.join(__dirname, 'dist', 'index.html');
+      overlay.loadFile(indexPath, { hash: '/overlay' });
+    } else {
+      overlay.loadURL(`${FRONTEND_URL}/#/overlay`);
+    }
     
     // Add error handling
     overlay.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {

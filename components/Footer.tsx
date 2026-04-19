@@ -1,7 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { APP_CONFIG } from '../src/config';
 
 const Footer: React.FC = () => {
+  const isElectron = typeof window !== 'undefined' && (window as any).require;
+  const showDownload = !isElectron && APP_CONFIG.DOWNLOAD_WINDOWS;
+  
   return (
     <footer className="bg-slate-100 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 py-8 sm:py-12 transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -40,6 +44,20 @@ const Footer: React.FC = () => {
             </ul>
           </div>
         </div>
+        
+        {/* Download CTA Button */}
+        {showDownload && (
+          <div className="my-8 sm:my-12 text-center">
+            <a
+              href={APP_CONFIG.DOWNLOAD_WINDOWS}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl transition-all transform hover:scale-105"
+            >
+              🚀 Download Stealth Assist for Windows
+            </a>
+          </div>
+        )}
         
         <div className="border-t border-slate-200 dark:border-slate-800 pt-6 sm:pt-8 text-center">
           <p className="text-slate-500 dark:text-slate-600 text-xs sm:text-sm">

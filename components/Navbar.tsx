@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDarkMode } from '../src/context/DarkModeContext';
+import { APP_CONFIG } from '../src/config';
 
 interface NavbarProps {
   user?: any;
@@ -70,6 +71,14 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                 <Link to="/" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
                   Home
                 </Link>
+                {!isElectron && APP_CONFIG.DOWNLOAD_WINDOWS && (
+                  <Link 
+                    to="/?section=download#download"
+                    className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-sm font-bold transition-all shadow-md hover:shadow-lg"
+                  >
+                    Stealth
+                  </Link>
+                )}
                 <Link to="/features" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
                   Features
                 </Link>
