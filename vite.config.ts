@@ -30,14 +30,12 @@ function spaFallbackPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // Determine backend URL based on mode
-    // For production build, use Railway URL; for dev use localhost
-    const isProductionBuild = process.env.NODE_ENV === 'production' || mode === 'production';
-    const backendUrl = isProductionBuild && env.API_BACKEND_URL 
-      ? env.API_BACKEND_URL 
-      : (env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001');
+    // Backend URL: Railway for production, localhost for development
+    const backendUrl = mode === 'production' 
+      ? (env.API_BACKEND_URL || 'https://stealth-ai-production-e686.up.railway.app')
+      : 'http://localhost:3001';
     
-    console.log(`Building for ${mode} mode, backend: ${backendUrl}`);
+    console.log(`Building for ${mode}, backend: ${backendUrl}`);
     
     return {
       base: './',
@@ -50,11 +48,8 @@ export default defineConfig(({ mode }) => {
         spaFallbackPlugin()
       ],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(env.VITE_DOWNLOAD_WINDOWS || ''),
-        'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(env.VITE_DOWNLOAD_MAC || ''),
-        'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(env.VITE_DOWNLOAD_LINUX || ''),
+        'import.meta.env.DEV': JSON.stringify(mode === 'development'),
+        'import.meta.env.PROD': JSON.stringify(mode === 'production'),
         'import.meta.env.VITE_BACKEND_URL': JSON.stringify(backendUrl),
         'import.meta.env.VITE_API_URL': JSON.stringify(backendUrl + '/api'),
       },
@@ -63,7 +58,6 @@ export default defineConfig(({ mode }) => {
           '@': path.resolve(__dirname, '.'),
         }
       },
-      // Handle SPA routing for production preview
       preview: {
         port: 3000,
         host: '0.0.0.0',
