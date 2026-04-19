@@ -810,9 +810,38 @@ function createMainWindow() {
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
     
     if (app.isPackaged) {
-      // Load from local dist folder
-      const indexPath = path.join(__dirname, 'dist', 'index.html');
-      console.log('📂 Loading frontend from:', indexPath);
+      // Try multiple paths for dist folder (handles both installer and portable)
+      let possiblePaths = [
+        path.join(__dirname, 'dist', 'index.html'),
+        path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+        path.join(process.resourcesPath, 'dist', 'index.html'),
+        path.join(app.getAppPath(), 'dist', 'index.html'),
+        path.join(path.dirname(app.getPath('exe')), 'resources', 'app', 'dist', 'index.html'),
+      ];
+      
+      // For portable exe, it runs from different location
+      if (process.resourcesPath.includes('app-')) {
+        possiblePaths = [
+          path.join(__dirname, 'dist', 'index.html'),
+          path.join(path.dirname(app.getPath('exe')), 'resources', 'app', 'dist', 'index.html'),
+          path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+        ];
+      }
+      
+      let indexPath = possiblePaths[0];
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          indexPath = p;
+          console.log('✅ Found index.html at:', p);
+          break;
+        }
+      }
+      
+      console.log('📂 Loading main window from:', indexPath);
+      console.log('📂 __dirname:', __dirname);
+      console.log('📂 resourcesPath:', process.resourcesPath);
+      console.log('📂 exe path:', app.getPath('exe'));
+      
       mainWindow.loadFile(indexPath, { hash: '/service' });
     } else {
       mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
@@ -1098,8 +1127,23 @@ function createOverlayWindow() {
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
     
     if (app.isPackaged) {
-      const indexPath = path.join(__dirname, 'dist', 'index.html');
-      overlay.loadFile(indexPath, { hash: '/overlay' });
+      // Try multiple paths for dist folder
+      const possibleOverlayPaths = [
+        path.join(__dirname, 'dist', 'index.html'),
+        path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+        path.join(process.resourcesPath, 'dist', 'index.html'),
+      ];
+      
+      let overlayIndexPath = possibleOverlayPaths[0];
+      for (const p of possibleOverlayPaths) {
+        if (fs.existsSync(p)) {
+          overlayIndexPath = p;
+          break;
+        }
+      }
+      
+      console.log('📂 Loading overlay from:', overlayIndexPath);
+      overlay.loadFile(overlayIndexPath, { hash: '/overlay' });
     } else {
       overlay.loadURL(`${FRONTEND_URL}/#/overlay`);
     }
