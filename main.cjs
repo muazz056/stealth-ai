@@ -4,9 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// Determine correct backend URL for packaged app
-const DEPLOYED_BACKEND = 'https://stealth-ai-production-e686.up.railway.app';
-const BACKEND_URL = process.env.API_BACKEND_URL || (app.isPackaged ? DEPLOYED_BACKEND : 'http://localhost:3001');
+// ALWAYS use localhost for dev, Railway for packaged
+const LOCAL_BACKEND = 'http://localhost:3001';
+const RAILWAY_BACKEND = 'https://stealth-ai-production-e686.up.railway.app';
+
+// In dev mode use localhost, in packaged use Railway
+const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
