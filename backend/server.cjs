@@ -50,15 +50,22 @@ const CORS_ORIGINS = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',') 
   : ['http://localhost:5173', 'http://localhost:3001'];
 
+console.log('🌐 CORS_ORIGINS:', CORS_ORIGINS);
+
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or Electron)
     if (!origin) return callback(null, true);
     
-    if (CORS_ORIGINS.indexOf(origin) !== -1 || NODE_ENV === 'development') {
+    // Remove trailing slash for comparison
+    const originClean = origin.replace(/\/$/, '');
+    const allowedOrigins = CORS_ORIGINS.map(o => o.replace(/\/$/, ''));
+    
+    if (allowedOrigins.includes(originClean) || NODE_ENV === 'development') {
       callback(null, true);
     } else {
+      console.log('❌ CORS blocked:', origin, 'not in:', allowedOrigins);
       callback(new Error('Not allowed by CORS'));
     }
   },
