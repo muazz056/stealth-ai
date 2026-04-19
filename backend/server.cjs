@@ -1693,6 +1693,91 @@ app.post('/api/generate-stream', async (req, res) => {
   }
 });
 
+// Deepgram WebSocket proxy for browser clients
+// Will be initialized when first requested
+let wss = null;
+
+async function getDeepgramWSS() {
+  if (!wss) {
+    const { WebSocketServer } = await import('ws');
+    wss = new WebSocketServer({ noServer: true });
+    
+    wss.on('connection', async (ws, req) => {
+      console.log('📡 New Deepgram WebSocket connection');
+      
+      try {
+        const url = new URL(req.url, 'http://localhost');
+        const apiKey = url.searchParams.get('apiKey');
+        const language = url.searchParams.get('language') || 'en-US';
+        
+        if (!apiKey) {
+          ws.close(4001, 'API key required');
+          return;
+        }
+        
+        const deepgramWs = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language + '&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000', {
+          headers: {
+            'Authorization': 'Token ' + apiKey
+          }
+        });
+        
+        deepgramWs.on('open', () => {
+          console.log('📡 Connected to Deepgram');
+          ws.send(JSON.stringify({ type: 'connected' }));
+        });
+        
+        deepgramWs.on('message', (data) => {
+          ws.send(data.toString());
+        });
+        
+        deepgramWs.on('error', (err) => {
+          console.error('❌ Deepgram error:', err.message);
+          ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        });
+        
+        deepgramWs.on('close', () => {
+          console.log('📡 Deepgram closed');
+          ws.close();
+        });
+        
+        ws.on('message', (data) => {
+          if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
+            deepgramWs.send(data);
+          }
+        });
+        
+        ws.on('close', () => {
+          console.log('📡 Client disconnected');
+          deepgramWs.close();
+        });
+        
+      } catch (err) {
+        console.error('❌ Proxy error:', err.message);
+        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        ws.close();
+      }
+    });
+  }
+  return wss;
+}
+
+// WebSocket upgrade handler - integrate with existing HTTP server
+const httpServer = app.listen;
+app.listen = async function(...args) {
+  const server = httpServer.apply(this, args);
+  
+  const deepgramWSS = await getDeepgramWSS();
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url && req.url.startsWith('/api/deepgram-ws')) {
+      deepgramWSS.handleUpgrade(req, socket, head, (ws) => {
+        deepgramWSS.emit('connection', ws, req);
+      });
+    }
+  });
+  
+  return server;
+};
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
