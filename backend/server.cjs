@@ -1693,6 +1693,11 @@ app.post('/api/generate-stream', async (req, res) => {
   }
 });
 
+// Deepgram WebSocket proxy for browser clients (minimal version)
+app.get('/api/health', (req, res) => {
+  res.json({ success: true, message: 'Backend running' });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
