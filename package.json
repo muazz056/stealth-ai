@@ -2,7 +2,7 @@
   "name": "interview-stealth-assist",
   "version": "1.0.0",
   "description": "AI-powered interview assistant with real-time transcription and stealth overlay",
-  "author": "Your Name",
+  "author": "Chaudhry Muaz",
   "private": true,
   "type": "module",
   "main": "main.cjs",
@@ -76,7 +76,7 @@
   },
   "build": {
     "appId": "com.interviewassist.stealthai",
-    "productName": "Interview Stealth Assist",
+    "productName": "Stealth Assist",
     "buildDependenciesFromSource": false,
     "nodeGypRebuild": false,
     "npmRebuild": false,
@@ -87,6 +87,7 @@
     "files": [
       "dist/**/*",
       "main.cjs",
+      "auth.cjs",
       "browser-preload.js",
       "backend/**/*",
       "speech_bridge.py",
@@ -98,27 +99,7 @@
       "package.json",
       ".env"
     ],
-    "extraResources": [
-      {
-        "from": "backend",
-        "to": "backend",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "speech_bridge.py",
-        "to": "speech_bridge.py"
-      },
-      {
-        "from": "deepgram_speech_bridge.py",
-        "to": "deepgram_speech_bridge.py"
-      },
-      {
-        "from": "deepgram_bridge.cjs",
-        "to": "deepgram_bridge.cjs"
-      }
-    ],
+    "asar": false,
     "win": {
       "target": [
         {
@@ -182,7 +163,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Interview Stealth Assist"
+      "shortcutName": "Stealth Assist"
     },
     "portable": {
       "artifactName": "InterviewStealthAssist-Portable.exe"

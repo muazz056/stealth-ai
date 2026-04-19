@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ResumeData } from '../types';
 
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
 interface ResumeManagerProps {
   onDataParsed: (data: ResumeData) => void;
   currentResume: ResumeData | null;
@@ -38,7 +40,7 @@ const ResumeManager: React.FC<ResumeManagerProps> = ({ onDataParsed, currentResu
       const formData = new FormData();
       formData.append('cv', file);
 
-      const response = await fetch('http://localhost:3001/api/cv/parse', {
+      const response = await fetch(`${API_BASE_URL}/api/cv/parse`, {
         method: 'POST',
         body: formData
       });

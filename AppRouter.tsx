@@ -144,7 +144,7 @@ const AppRouter: React.FC = () => {
       console.log('✅ Clear history result:', result);
       
       // Reset conversation context AND clear all summaries (fresh start)
-      // PRESERVE: apiKeys (permanent), CV, Base Prompt
+      // PRESERVE: apiKeys (permanent), CV, Base Prompt, Response Language
       const resetSettings = {
         ...(currentUser.settings || {}),
         jobDescription: '',
@@ -152,11 +152,12 @@ const AppRouter: React.FC = () => {
         // Clear ALL summaries on New Session (fresh start)
         jobDescriptionSummary: '',
         companyInfoSummary: '',
-        // Keep CV and Base Prompt (they're reusable)
+        // Keep CV, Base Prompt, and Response Language (they're reusable)
         cvSummary: currentUser.settings?.cvSummary || '',
         basePromptSummary: currentUser.settings?.basePromptSummary || '',
         cvText: currentUser.settings?.cvText || '',
         basePrompt: currentUser.settings?.basePrompt || '',
+        responseLanguage: currentUser.settings?.responseLanguage || 'English',
         contextMessages: currentUser.settings?.contextMessages ?? 5,
         // PRESERVE API KEYS (they should never be reset)
         apiKeys: currentUser.settings?.apiKeys || {}

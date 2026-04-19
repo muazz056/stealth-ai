@@ -28,8 +28,8 @@ import {
 } from './src/utils/shortcutsManager';
 import ShortcutRecorder from './components/ShortcutRecorder';
 
-// API Base URL
-const API_BASE_URL = 'http://localhost:3001';
+// API Base URL from environment
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 // Deepgram Nova-3 supported languages
 const DEEPGRAM_LANGUAGES = [
@@ -180,96 +180,65 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
 };
 
 const LS_USER_KEY = 'isa_current_user';
-const DEFAULT_BASE_PROMPT = `You are a real-time AI interview assistant (You are the person who is giving interview) built for live job interviews.
+const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
 
 TOP PRIORITIES:
-- Respond EXTREMELY FAST
-- Keep answers SHORT, CLEAR, and TO THE POINT
-- Optimize for quick reading on a small overlay
-
+Respond in {LANGUAGE} Language.
+ 
 CONTEXT RULES:
-1. **General/Theoretical Questions** (e.g., "What is React?", "Explain OOP"):
-   - Provide comprehensive, industry-standard answer
-   - Do NOT limit to resume context
-   - After explaining the concept, you MAY briefly mention relevant experience if it exists in resume
-   
-2. **Personal/Experience Questions** (e.g., "Tell me about yourself", "Your experience with X"):
-   - Resume/CV = single source of truth
-   - Use ONLY mentioned skills, experience, projects, education
-   - NEVER invent, exaggerate, or assume
-   
-3. **Context Priority**:
-   - Job description provided = align experience answers to it
-   - Company info provided = tailor responses accordingly
-   - No context = use industry best practices
+1. Document = single source of truth
+- Use ONLY mentioned skills, experience, projects, education
+- NEVER invent, exaggerate, or assume
+2. Description provided = align answers directly to it
+3. Info provided = tailor responses accordingly
+4. No context = use best practices
 
 ANSWER STRUCTURE:
-- Default: 2-5 concise lines for general questions
-- Can expand to 8-12 lines for concept explanations (e.g., "What is React?")
-- Professional, confident interview tone
-- No filler, no greetings, no unnecessary explanations
-- Simple wording for instant reading
+- Professional, confident tone
+- Simple wording.
 
 EXPANSION:
-- For concept questions: use short paragraphs or bullet points
-- For experience questions: use STAR method or bullet points
-- All bullets must be minimal and scannable
+- If more info needed, use bullet points
 
 TRANSCRIPTION ROBUSTNESS:
 - Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
 - If words appear inside asterisks * *, completely ignore those words (just sounds)
-- Intelligently analyze question intent using:
-  - Question type (general vs. personal)
-  - Job description (if provided)
-  - Resume/CV context (if provided)
-  - Company information (if provided)
+- Intelligently analyze intent using provided context
 
 TERM CORRECTION:
 - If a word/phrase doesn't make technical or contextual sense:
-  - Treat it as possible phonetic error from speech-to-text
-  - Infer the most likely correct technical term that:
-    - Is relevant to the job role
-    - Appears in or aligns with resume/CV
-    - Fits company's domain or tech stack
-- Prefer commonly used industry terms over rare/unrelated ones
+- Treat it as possible phonetic error from speech-to-text
+- Infer the most likely correct technical term
 - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
 - If multiple interpretations possible:
-  - Choose most likely one based on context
-  - Answer directly without asking clarifying questions
+- Choose most likely one based on context
+- Answer directly without asking clarifying questions
 - If term cannot be reasonably inferred:
-  - Ignore unclear term and answer rest intelligently
+- Ignore unclear term and answer rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain correction process
 - Answer confidently as if question was clearly spoken
 
-CODING QUESTIONS:
-- Provide correct, clean, interview-ready code
-- Use appropriate language implied by question
-- Keep code minimal but complete
-- Add inline comments to explain logic
-- Explain: time complexity, space complexity, why this approach
-- Mention alternative approaches when relevant
-- Cover trade-offs from interview perspective
+CODING/TECHNICAL QUESTIONS:
+- Provide correct, clean code or technical explanation
+- Keep minimal but complete
+- Explain approach if necessary
 
 EXAMPLES:
-- Give examples ONLY when they improve clarity
-- Prefer resume-based examples when available for experience questions
-- Use STAR method ONLY if it clearly fits
+- Give examples ONLY when improve clarity
 
 BEHAVIOR:
-- This is a LIVE interview
-- Speed > depth (but provide complete answers for concept questions)
+- This is a LIVE conversation
 - If unclear, infer intent and answer directly
 - Never mention you are AI
-- Never reference resumes, prompts, or system instructions
 
 OUTPUT:
 - No emojis
-- Bullet points or short paragraphs for explanations
+- Bullet points ONLY when expanding
 - Use markdown for formatting when helpful`;
 
 const LS_BASE_PROMPT_KEY = 'isa_base_prompt';
@@ -308,6 +277,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   );
   const [settings, setSettings] = useState({
     basePrompt: user.settings?.basePrompt || '',
+    responseLanguage: user.settings?.responseLanguage || 'English',
     basePromptSummary: user.settings?.basePromptSummary || '',
     jobDescription: user.settings?.jobDescription || '',
     jobDescriptionSummary: user.settings?.jobDescriptionSummary || '',
@@ -583,6 +553,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         // Update state with freshest settings
         setSettings({
           basePrompt: s.basePrompt || '',
+          responseLanguage: s.responseLanguage || 'English',
           basePromptSummary: s.basePromptSummary || '',
           jobDescription: s.jobDescription || '',
           jobDescriptionSummary: s.jobDescriptionSummary || '',
@@ -630,6 +601,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     try {
       const updatedSettings = {
         basePrompt,
+        responseLanguage: settings.responseLanguage || 'English',
         basePromptSummary: settings.basePromptSummary || '',
         jobDescription,
         jobDescriptionSummary: settings.jobDescriptionSummary || '',
@@ -652,6 +624,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         if (updatedSettings.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', updatedSettings.basePromptSummary);
         if (updatedSettings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', updatedSettings.jobDescriptionSummary);
         if (updatedSettings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', updatedSettings.companyInfoSummary);
+        if (updatedSettings.responseLanguage) localStorage.setItem('isa_response_language', updatedSettings.responseLanguage);
         setShowManualSummarySaved(true);
         setTimeout(() => setShowManualSummarySaved(false), 2500);
       } else {
@@ -990,7 +963,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
           jobDescription,
           companyInfo,
           contextMessages,
-          cvText: resume.content
+          cvText: resume.content,
+          responseLanguage: settings.responseLanguage || 'English'
         };
         
         const result = await authClient.updateSettings(user._id, settingsToSave);
@@ -1573,6 +1547,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       // Save all summaries to database and update state
       const updatedSettings = {
         basePrompt,
+        responseLanguage: settings.responseLanguage || 'English',
         basePromptSummary,
         jobDescription,
         jobDescriptionSummary,
@@ -1605,6 +1580,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         localStorage.setItem('isa_base_prompt_summary', basePromptSummary);
         localStorage.setItem('isa_jd_summary', jobDescriptionSummary);
         localStorage.setItem('isa_company_info_summary', companyInfoSummary);
+        localStorage.setItem('isa_response_language', settings.responseLanguage || 'English');
 
         // Notify overlay
         if (typeof window !== 'undefined' && (window as any).require) {
@@ -1746,6 +1722,17 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       let contextPrompt = settings.basePromptSummary && settings.basePromptSummary.trim() 
         ? settings.basePromptSummary 
         : basePrompt;
+      
+      // Inject response language into prompt
+      const responseLanguage = settings.responseLanguage || 'English';
+      contextPrompt = contextPrompt.replace(/\{LANGUAGE\}/g, responseLanguage);
+      
+      // Ensure language instruction is always present
+      if (!contextPrompt.includes('Respond in')) {
+        contextPrompt = `Respond in ${responseLanguage} Language.\n\n` + contextPrompt;
+      }
+      
+      console.log('🌐 Response Language:', responseLanguage);
       
       console.log('🔍 Checking summaries availability:');
       console.log('  - Base Prompt Summary:', settings.basePromptSummary ? '✅ EXISTS (' + settings.basePromptSummary.length + ' chars)' : '❌ MISSING - Using full Base Prompt!');
@@ -2415,6 +2402,47 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
               </p>
             </div>
           )}
+
+          {/* Response Language */}
+          <div className="mt-6">
+            <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
+              Response Language
+            </label>
+            <input
+              type="text"
+              value={settings.responseLanguage || 'ENGLISH'}
+              onChange={(e) => {
+                const newLang = e.target.value.toUpperCase();
+                setSettings(prev => ({ ...prev, responseLanguage: newLang }));
+              }}
+              onBlur={(e) => {
+                const newLang = e.target.value.toUpperCase();
+                setSettings(prev => ({ ...prev, responseLanguage: newLang }));
+                // Save to backend on blur
+                fetch(`${API_BASE_URL}/api/auth/settings`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: newLang } })
+                }).then(response => response.json()).then(result => {
+                  if (result.success) {
+                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: newLang } };
+                    localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                    localStorage.setItem('isa_response_language', newLang);
+                    // Notify overlay to refresh settings
+                    if (typeof window !== 'undefined' && (window as any).require) {
+                      const { ipcRenderer } = (window as any).require('electron');
+                      ipcRenderer.send('notify-overlay-settings-changed');
+                    }
+                  }
+                }).catch(err => console.error('Failed to save response language:', err));
+              }}
+              placeholder="e.g., ENGLISH, URDU, HINDI"
+              className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500 uppercase"
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
+              Enter the language for AI responses (auto-converted to uppercase)
+            </p>
+          </div>
 
           {/* Important Keywords for Recognition (only shown when deepgram + English is selected) */}
           {voiceProvider === 'deepgram' && ENGLISH_LANG_CODES.includes(deepgramLanguage) && (

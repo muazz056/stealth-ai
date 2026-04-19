@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -103,12 +104,17 @@ async function startBackendServer() {
             // In packaged app, node_modules are in app.asar or resources
             const appPath = path.dirname(app.getAppPath());
             const nodeModulesPath = path.join(appPath, 'node_modules');
+            const resourcesPath = process.resourcesPath;
             
             console.log('📦 App path:', app.getAppPath());
+            console.log('📦 Resources path:', resourcesPath);
             console.log('📦 Node modules path:', nodeModulesPath);
             
             // Set NODE_PATH so backend can find modules
             env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
+            
+            // Set dotenv config path to find .env file
+            env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
         }
         
         // Spawn Node.js process for backend
@@ -183,10 +189,25 @@ function startPythonBridge() {
     console.log('🐍 Starting Python speech bridge...');
     
     try {
+        // Find Python script path
+        let bridgePath;
+        if (app.isPackaged) {
+            const possiblePaths = [
+                path.join(process.resourcesPath, 'app', 'speech_bridge.py'),
+                path.join(process.resourcesPath, 'speech_bridge.py'),
+                path.join(__dirname, 'speech_bridge.py'),
+            ];
+            bridgePath = possiblePaths.find(p => fs.existsSync(p)) || path.join(__dirname, 'speech_bridge.py');
+        } else {
+            bridgePath = path.join(__dirname, 'speech_bridge.py');
+        }
+        
+        console.log('📂 Python bridge path:', bridgePath);
+        
         // Spawn Python process
-        pythonProcess = spawn('python', ['speech_bridge.py'], {
+        pythonProcess = spawn('python', [bridgePath], {
             stdio: ['pipe', 'pipe', 'pipe'],
-            cwd: __dirname
+            cwd: path.dirname(bridgePath)
         });
         
         // Handle Python stdout (transcription results)
@@ -271,15 +292,25 @@ function startDeepgramBridge(apiKey, lang, keyterms = '') {
     deepgramApiKey = apiKey;
     
     try {
-        const bridgePath = app.isPackaged
-            ? path.join(process.resourcesPath, 'deepgram_speech_bridge.py')
-            : path.join(__dirname, 'deepgram_speech_bridge.py');
-        
-        // Check if Python script exists
-        if (!fs.existsSync(bridgePath)) {
-            console.error('❌ Deepgram Python bridge not found:', bridgePath);
-            return;
+        // Find Python script path - multiple possible locations
+        let bridgePath;
+        if (app.isPackaged) {
+            const possiblePaths = [
+                path.join(process.resourcesPath, 'app', 'deepgram_speech_bridge.py'),
+                path.join(process.resourcesPath, 'deepgram_speech_bridge.py'),
+                path.join(__dirname, 'deepgram_speech_bridge.py'),
+            ];
+            bridgePath = possiblePaths.find(p => fs.existsSync(p));
+            if (!bridgePath) {
+                console.error('❌ Deepgram Python bridge not found at any path:');
+                possiblePaths.forEach(p => console.error('   -', p, fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
+                return;
+            }
+        } else {
+            bridgePath = path.join(__dirname, 'deepgram_speech_bridge.py');
         }
+        
+        console.log('📂 Deepgram bridge path:', bridgePath);
         
         // Spawn Python process for Deepgram (native Windows audio - NO SOX!)
         deepgramProcess = spawn('python', [bridgePath], {
@@ -456,13 +487,45 @@ function initializeVoiceProvider(voiceProvider, apiKey = '', lang = '', keyterms
 
 // Import auth functions (will be loaded dynamically)
 let authModule = null;
-try {
-    // Load auth module (CommonJS version)
-    authModule = require('./auth.cjs');
-    console.log('✅ Auth module loaded successfully');
-} catch (e) {
-    console.error('❌ Auth module failed to load:', e.message);
-    console.warn('Authentication features will not be available');
+function loadAuthModule() {
+    try {
+        let authPath;
+        if (app.isPackaged) {
+            // Various possible locations for auth.cjs in packaged app
+            const possiblePaths = [
+                path.join(process.resourcesPath, 'app', 'auth.cjs'),
+                path.join(process.resourcesPath, 'auth.cjs'),
+                path.join(process.resourcesPath, 'app.asar.unpacked', 'auth.cjs'),
+                path.join(__dirname, 'resources', 'app', 'auth.cjs'),
+                path.join(app.getAppPath(), 'auth.cjs')
+            ];
+            
+            console.log('🔍 Looking for auth.cjs in packaged app...');
+            console.log('   resourcesPath:', process.resourcesPath);
+            console.log('   app.getAppPath():', app.getAppPath());
+            
+            authPath = possiblePaths.find(p => {
+                const exists = fs.existsSync(p);
+                console.log('   Checking:', p, exists ? '✅' : '❌');
+                return exists;
+            });
+            
+            if (!authPath) {
+                console.error('❌ Auth module not found at any path');
+                possiblePaths.forEach(p => console.log('   - Not found:', p));
+                return;
+            }
+        } else {
+            authPath = path.join(__dirname, 'auth.cjs');
+        }
+        
+        console.log('📂 Loading auth from:', authPath);
+        authModule = require(authPath);
+        console.log('✅ Auth module loaded:', typeof authModule);
+    } catch (e) {
+        console.error('❌ Auth module failed to load:', e.message);
+        console.warn('Authentication features will not be available');
+    }
 }
 
 // Backend API URL
@@ -744,7 +807,8 @@ function createMainWindow() {
     });
     
     // Load main setup page - go directly to app (not landing page)
-    mainWindow.loadURL('http://localhost:5173/#/service');
+    const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
+    mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
     
     // Add error handling
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
@@ -1023,7 +1087,8 @@ function createOverlayWindow() {
     });
     
     // Load overlay page directly
-    overlay.loadURL('http://localhost:5173/#/overlay');
+    const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
+    overlay.loadURL(`${FRONTEND_URL}/#/overlay`);
     
     // Add error handling
     overlay.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
@@ -1239,6 +1304,9 @@ function createOverlayWindow() {
 }
 
 app.whenReady().then(() => {
+    // Load auth module first
+    loadAuthModule();
+    
     // Start backend server first
     console.log('🚀 Starting backend server...');
     startBackendServer();

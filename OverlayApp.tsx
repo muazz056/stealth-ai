@@ -65,81 +65,61 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
   );
 };
 
-const DEFAULT_BASE_PROMPT = `You are a real-time AI interview assistant (You are the person who is giving interview) built for live job interviews.
+const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
 
 TOP PRIORITIES:
-- Respond EXTREMELY FAST
-- Keep answers SHORT, CLEAR, and TO THE POINT
-- Optimize for quick reading on a small overlay
-
+Respond in {LANGUAGE} Language.
+ 
 CONTEXT RULES:
-1. Resume/CV = single source of truth
-   - Use ONLY mentioned skills, experience, projects, education
-   - NEVER invent, exaggerate, or assume
-2. Job description provided = align answers directly to it
-3. Company info provided = tailor responses accordingly
-4. No context = use industry best practices
+1. Document = single source of truth
+- Use ONLY mentioned skills, experience, projects, education
+- NEVER invent, exaggerate, or assume
+2. Description provided = align answers directly to it
+3. Info provided = tailor responses accordingly
+4. No context = use best practices
 
 ANSWER STRUCTURE:
-- Default: 2-5 concise lines
-- Professional, confident interview tone
-- No filler, no greetings, no explanations
-- Simple wording for instant reading
+- Professional, confident tone
+- Simple wording.
 
 EXPANSION:
-- If more info needed, use short bullet points
-- Bullets must be minimal and scannable
+- If more info needed, use bullet points
 
 TRANSCRIPTION ROBUSTNESS:
 - Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
 - If words appear inside asterisks * *, completely ignore those words (just sounds)
-- Intelligently analyze question intent using:
-  - Job description (if provided)
-  - Resume/CV context (if provided)
-  - Company information (if provided)
+- Intelligently analyze intent using provided context
 
 TERM CORRECTION:
 - If a word/phrase doesn't make technical or contextual sense:
-  - Treat it as possible phonetic error from speech-to-text
-  - Infer the most likely correct technical term that:
-    - Is relevant to the job role
-    - Appears in or aligns with resume/CV
-    - Fits company's domain or tech stack
-- Prefer commonly used industry terms over rare/unrelated ones
+- Treat it as possible phonetic error from speech-to-text
+- Infer the most likely correct technical term
 - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
 - If multiple interpretations possible:
-  - Choose most likely one based on context
-  - Answer directly without asking clarifying questions
+- Choose most likely one based on context
+- Answer directly without asking clarifying questions
 - If term cannot be reasonably inferred:
-  - Ignore unclear term and answer rest intelligently
+- Ignore unclear term and answer rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain correction process
 - Answer confidently as if question was clearly spoken
 
-CODING QUESTIONS:
-- Provide correct, clean, interview-ready code
-- Use appropriate language implied by question
-- Keep code minimal but complete
-- Add inline comments to explain logic
-- Explain: time complexity, space complexity, why this approach
-- Mention alternative approaches when relevant
-- Cover trade-offs from interview perspective
+CODING/TECHNICAL QUESTIONS:
+- Provide correct, clean code or technical explanation
+- Keep minimal but complete
+- Explain approach if necessary
 
 EXAMPLES:
-- Give examples ONLY when they improve clarity
-- Prefer resume-based examples when available
-- Use STAR method ONLY if it clearly fits
+- Give examples ONLY when improve clarity
 
 BEHAVIOR:
-- This is a LIVE interview
-- Speed > depth
+- This is a LIVE conversation
 - If unclear, infer intent and answer directly
 - Never mention you are AI
-- Never reference resumes, prompts, or system instructions
 
 OUTPUT:
 - No emojis
@@ -157,7 +137,7 @@ const LS_CHAT_HISTORY_KEY = 'isa_chat_history';
 const LS_USER_KEY = 'isa_current_user';
 const LS_API_KEYS = 'isa_api_keys';
 const LS_API_PROVIDER = 'isa_api_provider';
-const API_BASE_URL = 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 // Deepgram Nova-3 supported languages (same as App.tsx)
 const DEEPGRAM_LANGUAGES = [
@@ -830,6 +810,7 @@ const OverlayApp: React.FC = () => {
           if (s.jobDescription) localStorage.setItem(LS_JD_KEY, s.jobDescription);
           if (s.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, s.companyInfo);
           if (s.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, s.basePrompt);
+          if (s.responseLanguage) localStorage.setItem('isa_response_language', s.responseLanguage);
         }
       } catch (e) {
         console.warn('Failed to refresh user from DB in overlay:', e);
@@ -1711,29 +1692,38 @@ const OverlayApp: React.FC = () => {
         : null;
 
       // Use base prompt summary if available, fallback to full base prompt
-      const basePromptSummaryToUse = settings.basePromptSummary || lsBasePromptSummary;
+      const basePromptSummaryToUse = overlayUserSettings?.basePromptSummary || lsBasePromptSummary;
       let contextPrompt = basePromptSummaryToUse && basePromptSummaryToUse.trim() 
         ? basePromptSummaryToUse 
         : savedBasePrompt;
       
+      // Inject response language into prompt
+      const responseLanguage = overlayUserSettings?.responseLanguage || 'English';
+      contextPrompt = contextPrompt.replace(/\{LANGUAGE\}/g, responseLanguage);
+      
+      // Ensure language instruction is always present
+      if (!contextPrompt.includes('Respond in')) {
+        contextPrompt = `Respond in ${responseLanguage} Language.\n\n` + contextPrompt;
+      }
+      
       // Use summaries for fast responses (fallback to full text, lightly truncated)
       const truncate = (text?: string | null, max = 4000) => (text ? text.slice(0, max) : '');
       
-      const cvSummaryToUse = settings.cvSummary || lsCvSummary;
+      const cvSummaryToUse = overlayUserSettings?.cvSummary || lsCvSummary;
       if (cvSummaryToUse) {
         contextPrompt += `\n\nCandidate Resume Summary:\n${cvSummaryToUse}`;
       } else if (savedResume) {
         contextPrompt += `\n\nCandidate Resume (truncated):\n${truncate(savedResume)}`;
       }
       
-      const jdSummaryToUse = settings.jobDescriptionSummary || lsJdSummary;
+      const jdSummaryToUse = overlayUserSettings?.jobDescriptionSummary || lsJdSummary;
       if (jdSummaryToUse) {
         contextPrompt += `\n\nJob Description Summary:\n${jdSummaryToUse}`;
       } else if (savedJD) {
         contextPrompt += `\n\nJob Description (truncated):\n${truncate(savedJD)}`;
       }
       
-      const companySummaryToUse = settings.companyInfoSummary || lsCompanySummary;
+      const companySummaryToUse = overlayUserSettings?.companyInfoSummary || lsCompanySummary;
       if (companySummaryToUse) {
         contextPrompt += `\n\nCompany Information Summary:\n${companySummaryToUse}`;
       } else if (savedCompanyInfo) {
@@ -1936,7 +1926,8 @@ const OverlayApp: React.FC = () => {
           ? localStorage.getItem(LS_COMPANY_INFO_KEY)
           : null;
 
-        let contextPrompt = `${savedBasePrompt} You will be given a screenshot containing one or more questions. Carefully analyze the image and provide accurate, clear, and to-the-point answers.`;
+        const responseLanguage = overlayUserSettings?.responseLanguage || 'English';
+        let contextPrompt = `${savedBasePrompt.replace(/\{LANGUAGE\}/g, responseLanguage)} Respond in ${responseLanguage} Language. You will be given a screenshot containing one or more questions. Carefully analyze the image and provide accurate, clear, and to-the-point answers.`;
         
         if (savedResume) contextPrompt += `\n\nCandidate Resume Context:\n${savedResume}`;
         if (savedJD) contextPrompt += `\n\nJob Description Context:\n${savedJD}`;
@@ -3090,6 +3081,67 @@ ${companyInfoSummary}`;
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
+                  Response Language
+                </label>
+                <input
+                  type="text"
+                  value={overlayUserSettings?.responseLanguage || 'ENGLISH'}
+                  onChange={(e) => {
+                    const newLang = e.target.value.toUpperCase();
+                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: newLang }));
+                  }}
+                  onBlur={async (e) => {
+                    const newLang = e.target.value.toUpperCase();
+                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: newLang }));
+                    
+                    console.log('🌐 [Overlay] Response Language change:', newLang);
+                    
+                    try {
+                      const userStr = localStorage.getItem(LS_USER_KEY);
+                      if (userStr) {
+                        const user = JSON.parse(userStr);
+                        const token = localStorage.getItem('token');
+                        
+                        const response = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                          },
+                          body: JSON.stringify({ 
+                            userId: user._id,
+                            settings: { ...user.settings, responseLanguage: newLang }
+                          })
+                        });
+                        
+                        if (response.ok) {
+                          console.log('✅ [Overlay] Response language saved to database');
+                          
+                          // Update localStorage
+                          user.settings = { ...user.settings, responseLanguage: newLang };
+                          localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
+                          localStorage.setItem('isa_response_language', newLang);
+                          
+                          // Notify main app to refresh settings
+                          if (typeof window !== 'undefined' && (window as any).require) {
+                            const { ipcRenderer } = (window as any).require('electron');
+                            ipcRenderer.send('notify-overlay-settings-changed');
+                          }
+                        } else {
+                          console.error('❌ [Overlay] Failed to save response language:', await response.text());
+                        }
+                      }
+                    } catch (err) {
+                      console.error('❌ [Overlay] Response language save error:', err);
+                    }
+                  }}
+                  placeholder="e.g., ENGLISH, URDU, HINDI"
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:border-purple-500 hover:border-purple-500 transition-colors uppercase"
+                />
               </div>
               
               <div className="text-xs text-gray-400 bg-gray-900/50 border border-gray-700 rounded-lg p-3">
