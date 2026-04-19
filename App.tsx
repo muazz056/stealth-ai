@@ -29,7 +29,11 @@ import {
 import ShortcutRecorder from './components/ShortcutRecorder';
 
 // API Base URL from environment
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+// Detect if running in Electron and use appropriate backend
+const isElectron = typeof window !== 'undefined' && (window as any).require;
+const API_BASE_URL = isElectron 
+  ? (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001')
+  : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001');
 
 // Deepgram Nova-3 supported languages
 const DEEPGRAM_LANGUAGES = [
@@ -104,7 +108,8 @@ const ENGLISH_LANG_CODES = ['en', 'en-US', 'en-GB', 'en-AU', 'en-IN', 'en-NZ', '
 
 function buildDeepgramUrl(langCode: string, keyterms: string = '') {
   const isEnglish = ENGLISH_LANG_CODES.includes(langCode);
-  let url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${langCode}&interim_results=true&vad_events=true`;
+  // Add encoding for browser audio (Opus vs raw PCM)
+  let url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${langCode}&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000`;
   
   if (isEnglish) {
     // Full features for English / Multilingual
@@ -1799,7 +1804,9 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       }
 
       // Use streaming endpoint
-      console.log('📡 Starting streaming response...');
+      console.log('📡 Starting streaming...');
+      console.log('📡 Backend URL:', API_BASE_URL);
+      console.log('📡 Provider:', apiProvider);
       const response = await fetch(`${API_BASE_URL}/api/generate-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
