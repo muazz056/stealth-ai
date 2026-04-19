@@ -1699,7 +1699,7 @@ let wss = null;
 
 async function getDeepgramWSS() {
   if (!wss) {
-    const { WebSocketServer } = await import('ws');
+    const { WebSocketServer, WebSocket } = await import('ws');
     wss = new WebSocketServer({ noServer: true });
     
     wss.on('connection', async (ws, req) => {
