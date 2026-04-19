@@ -1247,14 +1247,48 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       // Electron: Use Python Bridge
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
-      console.log('🐍 Started Python speech recognition (real-time, free!)');
+      console.log('🎤 VOICE: Python Bridge (Deepgram via Python)');
       
-} else if (recognitionRef.current) {
+} else if (voiceProvider === 'deepgram' && deepgramApiKey) {
+      // Browser + Deepgram: Use backend proxy with WebSocket
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        deepgramAudioRef.current = stream;
+        
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorderRef.current = mediaRecorder;
+        
+        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
+        deepgramWsRef.current = ws;
+        
+        ws.onopen = () => {
+          console.log('🎤 VOICE: Deepgram (via backend proxy)');
+          mediaRecorder.start(250);
+        };
+        
+        ws.onmessage = (event) => {
+          // Handle transcription results
+        };
+        
+        ws.onerror = (e) => {
+          console.error('Deepgram proxy error:', e);
+        };
+        
+        ws.onclose = () => {
+          console.log('Deepgram proxy closed');
+        };
+        
+        setIsListening(true);
+      } catch (e) {
+        console.error('Failed to start Deepgram:', e);
+        setIsListening(false);
+      }
+    } else if (recognitionRef.current) {
       // Browser: Use Web Speech API (fallback/default)
       try { 
         recognitionRef.current.start();
         setIsListening(true);
-        console.log('🌐 Started Web Speech API recognition');
+        console.log('🎤 VOICE: Web Speech API (browser built-in)');
       } catch(e) {
         console.error('Failed to start recognition:', e);
         setIsListening(false);
