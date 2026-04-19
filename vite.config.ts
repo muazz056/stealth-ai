@@ -29,6 +29,16 @@ function spaFallbackPlugin(): Plugin {
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    
+    // Determine backend URL based on mode
+    // For production build, use Railway URL; for dev use localhost
+    const isProductionBuild = process.env.NODE_ENV === 'production' || mode === 'production';
+    const backendUrl = isProductionBuild && env.API_BACKEND_URL 
+      ? env.API_BACKEND_URL 
+      : (env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001');
+    
+    console.log(`Building for ${mode} mode, backend: ${backendUrl}`);
+    
     return {
       base: './',
       server: {
@@ -45,8 +55,8 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(env.VITE_DOWNLOAD_WINDOWS || ''),
         'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(env.VITE_DOWNLOAD_MAC || ''),
         'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(env.VITE_DOWNLOAD_LINUX || ''),
-        'import.meta.env.VITE_BACKEND_URL': JSON.stringify(env.API_BACKEND_URL || 'http://localhost:3001'),
-        'import.meta.env.VITE_API_URL': JSON.stringify((env.API_BACKEND_URL || 'http://localhost:3001') + '/api'),
+        'import.meta.env.VITE_BACKEND_URL': JSON.stringify(backendUrl),
+        'import.meta.env.VITE_API_URL': JSON.stringify(backendUrl + '/api'),
       },
       resolve: {
         alias: {

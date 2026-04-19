@@ -171,7 +171,8 @@ async def start_deepgram():
         # Minimal features for non-English
         extra = "&endpointing=300&utterance_end_ms=1000"
     
-    url = f"wss://api.deepgram.com/v1/listen?{base_params}{extra}"
+    # Add API key as query parameter (NOT header - WebSocket uses query param auth!)
+    url = f"wss://api.deepgram.com/v1/listen?{base_params}{extra}&authorization=token%20{api_key}"
     
     # Add keyterms if provided (only for English)
     if is_english and keyterms and keyterms.strip():
@@ -187,14 +188,10 @@ async def start_deepgram():
     if is_english and keyterms:
         send_status(f"Keyterms: {len([t for t in keyterms.split(',') if t.strip()])} terms loaded")
     
-    headers = {
-        "Authorization": f"Token {api_key}"
-    }
-    
-    send_status(f"Connecting to Deepgram (key length: {len(api_key)})")
+    send_status(f"Connecting to Deepgram (key first 10 chars: {api_key[:10] if api_key else 'empty'})")
     
     try:
-        async with websockets.connect(url, additional_headers=headers) as ws:
+        async with websockets.connect(url) as ws:
             ws_connection = ws
             is_listening = True
             send_status("Deepgram connection established")

@@ -106,10 +106,11 @@ const DEEPGRAM_LANGUAGES = [
 // English-like languages that support full Deepgram features
 const ENGLISH_LANG_CODES = ['en', 'en-US', 'en-GB', 'en-AU', 'en-IN', 'en-NZ', 'multi'];
 
-function buildDeepgramUrl(langCode: string, keyterms: string = '') {
+function buildDeepgramUrl(langCode: string, keyterms: string = '', apiKey: string = '') {
   const isEnglish = ENGLISH_LANG_CODES.includes(langCode);
   // Add encoding for browser audio (Opus vs raw PCM)
-  let url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${langCode}&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000`;
+  // IMPORTANT: Deepgram WebSocket uses query param auth, NOT protocol headers!
+  let url = `wss://api.deepgram.com/v1/listen?model=nova-3&language=${langCode}&interim_results=true&vad_events=true&encoding=opus&sample_rate=16000&authorization=token%20${encodeURIComponent(apiKey)}`;
   
   if (isEnglish) {
     // Full features for English / Multilingual
