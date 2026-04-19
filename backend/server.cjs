@@ -5,10 +5,45 @@ const { MongoClient, ObjectId } = require('mongodb');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const MONGO_URI = process.env.MONGODB_URI;
+
+// Try process.env first, then fallback to .env file
+let MONGO_URI = process.env.MONGODB_URI;
+
+// Fallback: try to load .env from file
+if (!MONGO_URI) {
+  const possiblePaths = [
+    path.join(process.cwd(), '.env'),
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', '.env'),
+  ];
+  
+  for (const envPath of possiblePaths) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        envContent.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('MONGODB_URI=')) {
+            MONGO_URI = trimmed.substring('MONGODB_URI='.length).trim();
+          }
+        });
+        if (MONGO_URI) break;
+      }
+    } catch (e) {
+      // Continue to next path
+    }
+  }
+}
+
+if (!MONGO_URI) {
+  console.error('❌ FATAL: MONGODB_URI is not set! Set in Railway environment variables or .env file');
+}
+
 const DB_NAME = 'interview_assistant';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CORS_ORIGINS = process.env.CORS_ORIGINS 
@@ -45,14 +80,33 @@ let db = null;
 async function connectDB() {
   if (db) return db;
   try {
-    const client = new MongoClient(MONGO_URI);
+    // Try with TLS options for better compatibility
+    const client = new MongoClient(MONGO_URI, {
+      tls: true,
+      tlsAllowInvalidCertificates: false,
+      tlsAllowInvalidHostnames: false,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
     await client.connect();
     db = client.db(DB_NAME);
     console.log('✅ Backend DB connected to MongoDB');
     return db;
   } catch (error) {
     console.error('❌ Backend DB connection failed:', error);
-    throw error;
+    // Try again without TLS options as fallback
+    try {
+      const client = new MongoClient(MONGO_URI, {
+        serverSelectionTimeoutMS: 15000,
+      });
+      await client.connect();
+      db = client.db(DB_NAME);
+      console.log('✅ Backend DB connected (fallback mode)');
+      return db;
+    } catch (fallbackError) {
+      console.error('❌ Fallback also failed:', fallbackError);
+      throw error;
+    }
   }
 }
 
