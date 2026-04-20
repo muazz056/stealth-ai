@@ -1,11 +1,37 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Footer from '../components/Footer';
 import { APP_CONFIG } from '../src/config';
+
+const LS_USER_KEY = 'isa_current_user';
 
 const LandingPage: React.FC = () => {
   const isElectron = typeof window !== 'undefined' && (window as any).require;
   const showDownload = !isElectron && APP_CONFIG.DOWNLOAD_WINDOWS;
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const isLoggedIn = () => {
+    try {
+      const user = localStorage.getItem(LS_USER_KEY);
+      return !!user && JSON.parse(user)?._id;
+    } catch { return false; }
+  };
+  
+  useEffect(() => {
+    if (location.hash === '#download') {
+      setTimeout(() => {
+        document.getElementById('download')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  }, [location]);
+  
+  const handleDownloadClick = (e: React.MouseEvent) => {
+    if (!isLoggedIn()) {
+      e.preventDefault();
+      navigate('/service');
+    }
+  };
   
   return (
     <div className="min-h-screen bg-white dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-colors duration-300">
@@ -200,7 +226,15 @@ interface DownloadCardProps {
 }
 
 const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, size, comingSoon }) => {
-  // Get download URL based on platform
+  const navigate = useNavigate();
+  
+  const isLoggedIn = () => {
+    try {
+      const user = localStorage.getItem(LS_USER_KEY);
+      return !!user && JSON.parse(user)?._id;
+    } catch { return false; }
+  };
+  
   const getDownloadUrl = () => {
     if (platform.toLowerCase().includes('windows')) {
       return APP_CONFIG.DOWNLOAD_WINDOWS;
@@ -217,6 +251,14 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, si
   const downloadUrl = getDownloadUrl();
   const isAvailable = !comingSoon && downloadUrl;
   
+  const handleDownload = () => {
+    if (!isLoggedIn()) {
+      navigate('/service');
+      return;
+    }
+    window.location.href = downloadUrl;
+  };
+  
   return (
     <div className="bg-white dark:bg-slate-800/30 backdrop-blur-sm border border-slate-200 dark:border-slate-700/50 rounded-2xl p-6 md:p-8 hover:border-blue-500/50 transition-all hover:scale-105 transform">
       <div className="text-5xl mb-4 text-center">{icon}</div>
@@ -232,14 +274,12 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, si
           Coming Soon
         </button>
       ) : (
-        <a
-          href={downloadUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl"
+        <button
+          onClick={handleDownload}
+          className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl"
         >
           Download
-        </a>
+        </button>
       )}
     </div>
   );

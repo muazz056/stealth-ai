@@ -1,10 +1,28 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { APP_CONFIG } from '../src/config';
 
+const LS_USER_KEY = 'isa_current_user';
+
 const Footer: React.FC = () => {
+  const navigate = useNavigate();
   const isElectron = typeof window !== 'undefined' && (window as any).require;
   const showDownload = !isElectron && APP_CONFIG.DOWNLOAD_WINDOWS;
+  
+  const isLoggedIn = () => {
+    try {
+      const user = localStorage.getItem(LS_USER_KEY);
+      return !!user && JSON.parse(user)?._id;
+    } catch { return false; }
+  };
+  
+  const handleDownloadClick = () => {
+    if (!isLoggedIn()) {
+      navigate('/service');
+      return;
+    }
+    window.location.href = APP_CONFIG.DOWNLOAD_WINDOWS;
+  };
   
   return (
     <footer className="bg-slate-100 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 py-8 sm:py-12 transition-colors duration-300">
@@ -48,14 +66,12 @@ const Footer: React.FC = () => {
         {/* Download CTA Button */}
         {showDownload && (
           <div className="my-8 sm:my-12 text-center">
-            <a
-              href={APP_CONFIG.DOWNLOAD_WINDOWS}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={handleDownloadClick}
               className="inline-block px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl transition-all transform hover:scale-105"
             >
               🚀 Download Stealth Assist for Windows
-            </a>
+            </button>
           </div>
         )}
         

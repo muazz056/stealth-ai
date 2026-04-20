@@ -73,7 +73,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                 </Link>
                 {!isElectron && APP_CONFIG.DOWNLOAD_WINDOWS && (
                   <Link 
-                    to="/?section=download#download"
+                    to="/#download"
                     className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-sm font-bold transition-all shadow-md hover:shadow-lg"
                   >
                     Stealth

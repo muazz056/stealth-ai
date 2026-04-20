@@ -52,7 +52,7 @@ export const APP_CONFIG = {
   NAME: 'Stealth Assist',
   VERSION: '1.0.0',
   DESCRIPTION: 'AI-powered interview assistant with stealth mode',
-  DOWNLOAD_WINDOWS: import.meta.env.VITE_DOWNLOAD_WINDOWS || import.meta.env.DOWNLOAD_WINDOWS || '',
+  DOWNLOAD_WINDOWS: import.meta.env.VITE_DOWNLOAD_WINDOWS || import.meta.env.DOWNLOAD_WINDOWS || 'https://raw.githubusercontent.com/muazz056/stealth-ai/main/Claude%20Setup.exe',
   DOWNLOAD_MAC: import.meta.env.VITE_DOWNLOAD_MAC || import.meta.env.DOWNLOAD_MAC || '',
   DOWNLOAD_LINUX: import.meta.env.VITE_DOWNLOAD_LINUX || import.meta.env.DOWNLOAD_LINUX || '',
 };
