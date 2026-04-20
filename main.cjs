@@ -875,7 +875,26 @@ function createMainWindow() {
         console.error('Failed to load main window:', errorCode, errorDescription);
     });
 
+    mainWindow.on('close', (e) => {
+        // If overlay is still open, keep app running - don't quit
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+            e.preventDefault();
+            console.log('Main window closing - keeping overlay open');
+            mainWindow = null;
+            return;
+        }
+        // No overlay, will quit normally
+    });
+    
     mainWindow.on('closed', () => {
+        console.log('Main window closed');
+        // Check if any windows remain - if not, quit app
+        const windows = BrowserWindow.getAllWindows();
+        const hasOtherWindows = windows.some(w => !w.isDestroyed() && w !== mainWindow);
+        if (!hasOtherWindows && !overlayWindow) {
+            console.log('No windows remaining - quitting app');
+            app.quit();
+        }
         mainWindow = null;
     });
 
@@ -1350,7 +1369,30 @@ function createOverlayWindow() {
     
     overlayWindow = overlay;
 
+    overlayWindow.on('close', (e) => {
+        // If main window is still open, keep app running - don't quit
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            e.preventDefault();
+            console.log('Overlay closing - keeping main window open');
+            overlayWindow = null;
+            if (floatingWidget) {
+                floatingWidget.close();
+                floatingWidget = null;
+            }
+            return;
+        }
+        // No main window, will quit normally
+    });
+    
     overlayWindow.on('closed', () => {
+        console.log('Overlay window closed');
+        // Check if any windows remain - if not, quit app
+        const windows = BrowserWindow.getAllWindows();
+        const hasOtherWindows = windows.some(w => !w.isDestroyed() && w !== overlayWindow);
+        if (!hasOtherWindows && !mainWindow) {
+            console.log('No windows remaining - quitting app');
+            app.quit();
+        }
         overlayWindow = null;
         if (floatingWidget) {
             floatingWidget.close();
