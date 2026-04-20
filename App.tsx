@@ -911,7 +911,90 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       window.removeEventListener('keydown', handleGlobalKeyPress, true);
       console.log('🗑️ Keyboard listener removed in App.tsx');
     };
-  }, [isGenerating, isListening]); // Re-run when isGenerating or isListening changes
+  }, [isGenerating, isListening, shortcuts]); // Re-run when isGenerating or isListening changes
+
+  // Handle user-defined shortcuts
+  useEffect(() => {
+    const handleShortcutKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      const pressedKey = e.key.toLowerCase();
+      const hasCtrl = e.ctrlKey || e.metaKey;
+      const hasShift = e.shiftKey;
+      const hasAlt = e.altKey;
+      
+      for (const [action, config] of Object.entries(shortcuts)) {
+        const mod = config.modifier.toLowerCase();
+        const configKey = config.key.toLowerCase();
+        
+        const modMatch = 
+          (mod === 'control' && hasCtrl) ||
+          (mod === 'meta' && (e.metaKey || hasCtrl)) ||
+          (mod === 'alt' && hasAlt) ||
+          (mod === 'shift' && hasShift);
+        
+        if (modMatch && pressedKey === configKey && !hasAlt) {
+          e.preventDefault();
+          console.log(`🎯 Shortcut triggered: ${action}, isGenerating: ${isGeneratingRef.current}`);
+          
+          switch (action) {
+            case 'toggleOverlay':
+              if (isElectronRef.current) {
+                ipcRendererRef.current?.send('launch-stealth-pip');
+              }
+              break;
+            case 'toggleListen':
+              if (isListeningRef.current) {
+                if (stopListenRef.current) stopListenRef.current();
+              } else {
+                if (startListenRef.current) startListenRef.current();
+              }
+              break;
+            case 'getAnswer':
+              if (!isGeneratingRef.current) {
+                const text = (isListeningRef.current ? transcribedTextRef.current : manualTextInputRef.current).trim();
+                console.log(`🎯 getAnswer triggered, text: "${text}"`);
+                if (text) {
+                  triggerGetAnswerRef.current = triggerGetAnswerRef.current + 1;
+                }
+              }
+              break;
+            case 'clearQuestion':
+              setManualTextInput('');
+              setTranscribedText('');
+              setCommittedText('');
+              setInterimText('');
+              break;
+            case 'focusInput':
+              const input = document.querySelector('textarea[placeholder*="question"]') as HTMLTextAreaElement;
+              if (input) input.focus();
+              break;
+            case 'stopOrClear':
+              if (isGeneratingRef.current) {
+                if (answerAbortRef.current) {
+                  answerAbortRef.current.abort();
+                  answerAbortRef.current = null;
+                }
+                setIsGenerating(false);
+              } else {
+                setManualTextInput('');
+                setTranscribedText('');
+                setCommittedText('');
+                setInterimText('');
+                setAiResponse('');
+              }
+              break;
+          }
+          return;
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleShortcutKeyDown, true);
+    return () => window.removeEventListener('keydown', handleShortcutKeyDown, true);
+  }, [shortcuts]);
 
   // Sync transcribedText from committedText + interimText (streaming display)
   useEffect(() => {
@@ -1040,6 +1123,29 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const deepgramAudioRef = useRef<any>(null); // MediaStream for Deepgram browser
   const audioChunksRef = useRef<Blob[]>([]);
   const questionInputRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Refs for current state values (to avoid stale closures)
+  const apiKeysRef = useRef(apiKeys);
+  const apiProviderRef = useRef(apiProvider);
+  const isListeningRef = useRef(isListening);
+  const manualTextInputRef = useRef(manualTextInput);
+  const transcribedTextRef = useRef(transcribedText);
+  const isGeneratingRef = useRef(isGenerating);
+  const triggerGetAnswerRef = useRef(0);
+  
+  useEffect(() => { apiKeysRef.current = apiKeys; }, [apiKeys]);
+  useEffect(() => { apiProviderRef.current = apiProvider; }, [apiProvider]);
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+  useEffect(() => { manualTextInputRef.current = manualTextInput; }, [manualTextInput]);
+  useEffect(() => { transcribedTextRef.current = transcribedText; }, [transcribedText]);
+  useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
+  
+  // Watch for shortcut trigger - call handleGetAnswer when counter changes
+  useEffect(() => {
+    if (triggerGetAnswerRef.current > 0) {
+      handleGetAnswer();
+    }
+  }, [triggerGetAnswerRef.current]);
 
   // Ensure the question textarea grows when text is updated programmatically
   useEffect(() => {
@@ -1598,9 +1704,16 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
 
   // Get Answer
   const handleGetAnswer = async () => {
-    const questionToAnswer = (isListening ? transcribedText : manualTextInput).trim();
+    // Use refs to get current values
+    const currentIsListening = isListeningRef.current;
+    const currentManualText = manualTextInputRef.current;
+    const currentTranscribed = transcribedTextRef.current;
+    const currentApiKeys = apiKeysRef.current;
+    const currentApiProvider = apiProviderRef.current;
+    
+    const questionToAnswer = (currentIsListening ? currentTranscribed : currentManualText).trim();
 
-    if (isListening) {
+    if (currentIsListening) {
       wantToListenRef.current = false; // Stop auto-restart
       setIsListening(false);
       if (recognitionRef.current) {
@@ -1609,7 +1722,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     }
 
     // Get the active API key based on selected provider
-    const activeApiKey = apiKeys[apiProvider];
+    const activeApiKey = currentApiKeys[currentApiProvider];
     
     if (!questionToAnswer || !activeApiKey) {
       if (!activeApiKey) {
