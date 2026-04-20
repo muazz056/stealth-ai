@@ -1250,32 +1250,54 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       console.log('🎤 VOICE: Python Bridge (Deepgram via Python)');
       
 } else if (voiceProvider === 'deepgram' && deepgramApiKey) {
-      // Browser + Deepgram: Use backend proxy with WebSocket
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         deepgramAudioRef.current = stream;
         
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         
         const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
         deepgramWsRef.current = ws;
         
         ws.onopen = () => {
-          console.log('🎤 VOICE: Deepgram (via backend proxy)');
-          mediaRecorder.start(250);
+          mediaRecorder.start(1000);
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              ws.send(event.data);
+            }
+          };
         };
         
         ws.onmessage = (event) => {
-          // Handle transcription results
-        };
-        
-        ws.onerror = (e) => {
-          console.error('Deepgram proxy error:', e);
+          try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'connected') {
+              // Ready
+            } else if (data.type === 'error') {
+              console.error('Deepgram error:', data.message);
+            } else if (data.channel) {
+              const transcript = data.channel?.alternatives?.[0]?.transcript;
+              if (transcript) {
+                if (data.is_final) {
+                  setCommittedText(prev => (prev + ' ' + transcript).trim());
+                  setInterimText('');
+                } else {
+                  setInterimText(transcript);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore
+          }
         };
         
         ws.onclose = () => {
-          console.log('Deepgram proxy closed');
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
         };
         
         setIsListening(true);

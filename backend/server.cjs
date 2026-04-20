@@ -1693,6 +1693,74 @@ app.post('/api/generate-stream', async (req, res) => {
   }
 });
 
+// ==================== DEEPGRAM WEBSOCKET PROXY ====================
+const { WebSocketServer, WebSocket } = require('ws');
+const deepgramWss = new WebSocketServer({ noServer: true });
+
+function setupDeepgramProxy(server) {
+  deepgramWss.on('connection', (ws, req) => {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const apiKey = url.searchParams.get('apiKey');
+      const language = url.searchParams.get('language') || 'en-US';
+      
+      if (!apiKey) {
+        ws.close(4001, 'API key required');
+        return;
+      }
+      
+      const dgWs = new WebSocket(
+        'wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language + 
+        '&interim_results=true&vad_events=true',
+        { headers: { 'Authorization': 'Token ' + apiKey } }
+      );
+      
+      dgWs.on('open', () => {
+        ws.send(JSON.stringify({ type: 'connected' }));
+      });
+      
+      dgWs.on('message', (data) => ws.send(data.toString()));
+      dgWs.on('error', (err) => {
+        console.error('Deepgram error:', err.message);
+        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+      });
+      dgWs.on('close', (code, reason) => ws.close());
+      
+      ws.on('message', (data) => {
+        // Handle binary audio data properly
+        if (data instanceof Buffer || data instanceof ArrayBuffer) {
+          if (dgWs.readyState === WebSocket.OPEN) dgWs.send(data);
+        } else if (dgWs.readyState === WebSocket.OPEN) {
+          dgWs.send(data);
+        }
+      });
+      
+      // Send keep-alive ping every 5 seconds
+      const pingInterval = setInterval(() => {
+        if (dgWs.readyState === WebSocket.OPEN) {
+          dgWs.ping();
+        } else {
+          clearInterval(pingInterval);
+        }
+      }, 5000);
+      ws.on('close', () => dgWs.close());
+      
+    } catch (err) {
+      console.error('📡 Proxy error:', err.message);
+      ws.send(JSON.stringify({ type: 'error', message: err.message }));
+      ws.close();
+    }
+  });
+  
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url.startsWith('/api/deepgram-ws')) {
+      deepgramWss.handleUpgrade(req, socket, head, (ws) => {
+        deepgramWss.emit('connection', ws, req);
+      });
+    }
+  });
+}
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
@@ -1706,7 +1774,7 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     await connectDB();
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log('');
       console.log('┌─────────────────────────────────────────────────┐');
       console.log('│  🚀 Interview Stealth Assist Backend Server   │');
@@ -1715,8 +1783,11 @@ async function startServer() {
       console.log('│  ✅ MongoDB: Connected                          │');
       console.log('│  🌐 CORS: Enabled                               │');
       console.log('└─────────────────────────────────────────────────┘');
-      console.log('');
+      
+      // Setup Deepgram WebSocket proxy
+      setupDeepgramProxy(server);
     });
+      console.log('');
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
