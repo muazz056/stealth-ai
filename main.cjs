@@ -875,26 +875,21 @@ function createMainWindow() {
         console.error('Failed to load main window:', errorCode, errorDescription);
     });
 
-    mainWindow.on('close', (e) => {
-        // If overlay is still open, keep app running - don't quit
+    mainWindow.on('closed', () => {
+        console.log('Main window closed');
+        // Check if overlay is still open - if so, don't quit yet
         if (overlayWindow && !overlayWindow.isDestroyed()) {
-            e.preventDefault();
-            console.log('Main window closing - keeping overlay open');
+            console.log('Overlay still open - keeping app running');
             mainWindow = null;
             return;
         }
-        // No overlay, will quit normally
-    });
-    
-    mainWindow.on('closed', () => {
-        console.log('Main window closed');
-        // Check if any windows remain - if not, quit app
-        const windows = BrowserWindow.getAllWindows();
-        const hasOtherWindows = windows.some(w => !w.isDestroyed() && w !== mainWindow);
-        if (!hasOtherWindows && !overlayWindow) {
-            console.log('No windows remaining - quitting app');
-            app.quit();
+        // No overlay, quit app
+        console.log('No windows remaining - quitting app');
+        if (pythonBridge) {
+            pythonBridge.kill();
+            pythonBridge = null;
         }
+        app.quit();
         mainWindow = null;
     });
 
@@ -1369,35 +1364,30 @@ function createOverlayWindow() {
     
     overlayWindow = overlay;
 
-    overlayWindow.on('close', (e) => {
-        // If main window is still open, keep app running - don't quit
+    overlayWindow.on('closed', () => {
+        console.log('Overlay window closed');
+        // Check if main window is still open - if so, don't quit yet
         if (mainWindow && !mainWindow.isDestroyed()) {
-            e.preventDefault();
-            console.log('Overlay closing - keeping main window open');
-            overlayWindow = null;
+            console.log('Main window still open - keeping app running');
             if (floatingWidget) {
                 floatingWidget.close();
                 floatingWidget = null;
             }
+            overlayWindow = null;
             return;
         }
-        // No main window, will quit normally
-    });
-    
-    overlayWindow.on('closed', () => {
-        console.log('Overlay window closed');
-        // Check if any windows remain - if not, quit app
-        const windows = BrowserWindow.getAllWindows();
-        const hasOtherWindows = windows.some(w => !w.isDestroyed() && w !== overlayWindow);
-        if (!hasOtherWindows && !mainWindow) {
-            console.log('No windows remaining - quitting app');
-            app.quit();
+        // No main window, quit app
+        console.log('No windows remaining - quitting app');
+        if (pythonBridge) {
+            pythonBridge.kill();
+            pythonBridge = null;
         }
-        overlayWindow = null;
         if (floatingWidget) {
             floatingWidget.close();
             floatingWidget = null;
         }
+        app.quit();
+        overlayWindow = null;
     });
 
     // Intercept minimize event from native title bar
