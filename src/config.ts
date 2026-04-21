@@ -52,7 +52,7 @@ export const APP_CONFIG = {
   NAME: 'Stealth Assist',
   VERSION: '1.0.0',
   DESCRIPTION: 'AI-powered interview assistant with stealth mode',
-  DOWNLOAD_WINDOWS: import.meta.env.VITE_DOWNLOAD_WINDOWS || import.meta.env.DOWNLOAD_WINDOWS,
+  DOWNLOAD_WINDOWS: import.meta.env.VITE_DOWNLOAD_WINDOWS || import.meta.env.DOWNLOAD_WINDOWS || 'https://drive.google.com/uc?export=download&id=1AMpVYXFcIEqrJm2iMEEvgZpUHCIb04kK',
   DOWNLOAD_MAC: import.meta.env.VITE_DOWNLOAD_MAC || import.meta.env.DOWNLOAD_MAC || '',
   DOWNLOAD_LINUX: import.meta.env.VITE_DOWNLOAD_LINUX || import.meta.env.DOWNLOAD_LINUX || '',
 };
