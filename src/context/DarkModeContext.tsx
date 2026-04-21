@@ -8,10 +8,10 @@ interface DarkModeContextType {
 const DarkModeContext = createContext<DarkModeContextType | undefined>(undefined);
 
 export const DarkModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Check localStorage and default to dark mode
+  // Check localStorage and default to light mode
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('isa_dark_mode');
-    return saved ? JSON.parse(saved) : true; // Default: dark mode ON
+    return saved ? JSON.parse(saved) : false; // Default: light mode ON
   });
 
   // Apply dark mode class to document
