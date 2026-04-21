@@ -3029,7 +3029,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
             </div>
             
               {/* Search Bar + Buttons */}
-              <div className="flex items-start gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <textarea
                   ref={questionInputRef}
                   value={isListening ? transcribedText : manualTextInput}
@@ -3068,41 +3068,44 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                     // Shift+Enter - New line (default behavior, just allow it)
                   }}
                   rows={1}
-                  className={`flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] ${
+                  className={`w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] ${
                     isListening ? 'opacity-90' : ''
                   }`}
                   style={{ lineHeight: '1.5' }}
                 />
 
+                {/* Buttons row - below on mobile, inline on desktop */}
+                <div className="flex gap-2">
                   <button 
-                  onClick={isListening ? handleStopListen : handleStartListen}
-                  disabled={isGenerating}
-                  className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
-                    isListening
-                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  } ${isGenerating ? 'opacity-50' : ''}`}
-                >
-                  {isListening ? 'Stop Listen' : 'Start Listen'}
+                    onClick={isListening ? handleStopListen : handleStartListen}
+                    disabled={isGenerating}
+                    className={`flex-1 sm:flex-none px-4 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+                      isListening
+                        ? 'bg-red-600 hover:bg-red-700 text-white'
+                        : 'bg-green-600 hover:bg-green-700 text-white'
+                    } ${isGenerating ? 'opacity-50' : ''}`}
+                  >
+                    {isListening ? 'Stop Listen' : 'Start Listen'}
                   </button>
                 
                   <button 
-                  onClick={() => {
-                    // Blur any focused input so arrows work immediately
-                    if (document.activeElement instanceof HTMLElement) {
-                      document.activeElement.blur();
-                    }
-                    handleGetAnswer();
-                  }}
-                  disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-                  className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all bg-blue-600 hover:bg-blue-700 text-white ${
-                    isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
-                      ? 'opacity-50'
-                      : ''
-                  }`}
-                >
-                  {isGenerating ? 'Generating...' : 'Get Answer'}
+                    onClick={() => {
+                      // Blur any focused input so arrows work immediately
+                      if (document.activeElement instanceof HTMLElement) {
+                        document.activeElement.blur();
+                      }
+                      handleGetAnswer();
+                    }}
+                    disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
+                    className={`flex-1 sm:flex-none px-4 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all bg-blue-600 hover:bg-blue-700 text-white ${
+                      isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
+                        ? 'opacity-50'
+                        : ''
+                    }`}
+                  >
+                    {isGenerating ? 'Generating...' : 'Get Answer'}
                   </button>
+                </div>
             </div>
                 </div>
 

@@ -2578,8 +2578,8 @@ ${companyInfoSummary}`;
 
       {/* Transcription Box with Button */}
       <div className="bg-gray-800 rounded-lg p-3 mb-3">
-        <div className="flex items-start gap-2">
-          <div className="flex-1 relative">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="w-full relative">
             <textarea
               ref={inputFieldRef}
               value={isListening ? transcribedText : manualTextInput}
@@ -2627,37 +2627,39 @@ ${companyInfoSummary}`;
           />
           </div>
 
-          <button
-            onClick={isListening ? handleStopListen : handleStartListen}
-            disabled={isGenerating}
-            className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
-              isListening
-                ? 'bg-red-500/40 hover:bg-red-500/60 text-white border-red-400/50 shadow-red-500/50'
-                : 'bg-green-500/40 hover:bg-green-500/60 text-white border-green-400/50 shadow-green-500/50'
-            } ${isGenerating ? 'opacity-50' : ''}`}
-            data-action="start-listen"
-          >
-            {isListening ? 'Stop' : 'Start Listen'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={isListening ? handleStopListen : handleStartListen}
+              disabled={isGenerating}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
+                isListening
+                  ? 'bg-red-500/40 hover:bg-red-500/60 text-white border-red-400/50 shadow-red-500/50'
+                  : 'bg-green-500/40 hover:bg-green-500/60 text-white border-green-400/50 shadow-green-500/50'
+              } ${isGenerating ? 'opacity-50' : ''}`}
+              data-action="start-listen"
+            >
+              {isListening ? 'Stop' : 'Start Listen'}
+            </button>
 
-          <button
-            onClick={() => {
-              // Blur any focused input so arrows work immediately
-              if (document.activeElement instanceof HTMLElement) {
-                document.activeElement.blur();
-              }
-              handleGetAnswer();
-            }}
-            disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-            className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
-              isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
-                ? 'opacity-50'
-                : ''
-            }`}
-            data-action="get-answer"
-          >
-            {isGenerating ? 'Generating...' : 'Get Answer'}
-          </button>
+            <button
+              onClick={() => {
+                // Blur any focused input so arrows work immediately
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
+                handleGetAnswer();
+              }}
+              disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
+                isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
+                  ? 'opacity-50'
+                  : ''
+              }`}
+              data-action="get-answer"
+            >
+              {isGenerating ? 'Generating...' : 'Get Answer'}
+            </button>
+          </div>
         </div>
       </div>
 
