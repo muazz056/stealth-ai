@@ -183,60 +183,45 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
 };
 
 const LS_USER_KEY = 'isa_current_user';
-const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
-
-TOP PRIORITIES:
-Respond in {LANGUAGE} Language.
+    const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
  
 CONTEXT RULES:
 1. Document = single source of truth
-- Use ONLY mentioned skills, experience, projects, education
+- Use mentioned skills, experience, projects, education
 - NEVER invent, exaggerate, or assume
 2. Description provided = align answers directly to it
 3. Info provided = tailor responses accordingly
 4. No context = use best practices
 
 ANSWER STRUCTURE:
-- Professional, confident tone
+- Professional, confident tone , important information first
 
 TRANSCRIPTION ROBUSTNESS:
 - Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
-- If words appear inside asterisks * *, completely ignore those words (just sounds)
 - Intelligently analyze intent using provided context
-
-TERM CORRECTION:
-- If a word/phrase doesn't make technical or contextual sense:
-- Treat it as possible phonetic error from speech-to-text
-- Infer the most likely correct technical term
-- Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
 - If multiple interpretations possible:
-- Choose most likely one based on context
-- Answer directly without asking clarifying questions
-- If term cannot be reasonably inferred:
-- Ignore unclear term and answer rest intelligently
+- Choose most likely one based on context (Job description or resume)
+- Answer directly without asking clarifying questions or mentioning in the response.
+
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain correction process
+- Never mention you are AI or language model
 - Answer confidently as if question was clearly spoken
 
 CODING/TECHNICAL QUESTIONS:
 - Provide correct, clean code or technical explanation
-- Keep minimal but complete
-- Explain approach if necessary
+- Explain each approach if necessary
 
 EXAMPLES:
-- Give examples ONLY when improve clarity
-
-BEHAVIOR:
-- This is a LIVE conversation
-- If unclear, infer intent and answer directly
-- Never mention you are AI
+- Give examples to improve clarity
 
 OUTPUT:
 - No emojis
+-Important information first, then details
 - Use markdown for formatting when helpful`;
 
 const LS_BASE_PROMPT_KEY = 'isa_base_prompt';
@@ -275,7 +260,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   );
   const [settings, setSettings] = useState({
     basePrompt: user.settings?.basePrompt || '',
-    responseLanguage: user.settings?.responseLanguage || 'English',
+    responseLanguage: user.settings?.responseLanguage || '',
     basePromptSummary: user.settings?.basePromptSummary || '',
     jobDescription: user.settings?.jobDescription || '',
     jobDescriptionSummary: user.settings?.jobDescriptionSummary || '',
@@ -599,11 +584,11 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     try {
       const updatedSettings = {
         basePrompt,
-        responseLanguage: settings.responseLanguage || 'English',
+        responseLanguage: settings.responseLanguage || '',
         basePromptSummary: settings.basePromptSummary || '',
-        jobDescription,
+        jobDescription,  // Use separate state variable
         jobDescriptionSummary: settings.jobDescriptionSummary || '',
-        companyInfo,
+        companyInfo,  // Use separate state variable
         companyInfoSummary: settings.companyInfoSummary || '',
         contextMessages,
         cvText: resume?.content || settings.cvText || '',
@@ -1294,23 +1279,45 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
 
         recognition.onstart = () => {
           setIsListening(true);
+          errorHandled = false; // Reset error flag on successful start
         };
 
         recognition.onresult = (event: any) => {
           let finalText = '';
+          let interimText = '';
           
           for (let i = event.resultIndex; i < event.results.length; i++) {
             if (event.results[i].isFinal) {
               finalText += event.results[i][0].transcript + ' ';
+            } else {
+              interimText += event.results[i][0].transcript;
             }
           }
           
+          // Keyword replacement function
+          const applyKeywords = (text: string) => {
+            if (!deepgramKeyterms || !deepgramKeyterms.trim()) return text;
+            const keywordsList = deepgramKeyterms.split(',').map((k: string) => k.trim()).filter((k: string) => k);
+            let result = text;
+            for (const keyword of keywordsList) {
+              if (keyword) {
+                const regex = new RegExp(keyword, 'gi');
+                result = result.replace(regex, keyword);
+              }
+            }
+            return result;
+          };
+          
           if (finalText.trim()) {
-            setTranscribedText(prev => prev + finalText);
+            setTranscribedText(prev => prev + applyKeywords(finalText));
+          }
+          if (interimText.trim()) {
+            setInterimText(applyKeywords(interimText));
           }
         };
 
         recognition.onend = () => {
+          if (errorHandled) return; // Don't restart if there was an error that stopped listening
           if (wantToListenRef.current) {
             setTimeout(() => {
               if (wantToListenRef.current && recognitionRef.current) {
@@ -1326,14 +1333,18 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
           }
         };
 
-        recognition.onerror = (e: any) => {
+        let errorHandled = false;
+        const handleError = (e: any) => {
           console.error('Speech error:', e.error);
           if (e.error === 'not-allowed') {
+            errorHandled = true;
             alert('Microphone permission denied');
+            setIsListening(false);
+            wantToListenRef.current = false;
           }
-          setIsListening(false);
-          wantToListenRef.current = false;
+          // For 'no-speech' and other errors, don't stop - continue listening
         };
+        recognition.onerror = handleError;
 
         recognitionRef.current = recognition;
       }
@@ -1420,6 +1431,17 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       } catch(e) {
         console.error('Failed to start recognition:', e);
         setIsListening(false);
+        // Retry once after short delay
+        setTimeout(() => {
+          if (wantToListenRef.current) {
+            try {
+              recognitionRef.current?.start();
+              setIsListening(true);
+            } catch (retryErr) {
+              console.error('Retry failed:', retryErr);
+            }
+          }
+        }, 500);
       }
     } else {
       console.error('❌ No speech recognition available');
@@ -1865,7 +1887,38 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         console.warn('⚠️ WARNING: Using FULL company text! Generate summary by clicking "Save Settings"');
       }
 
-      const fullPrompt = `${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
+      // Add keyword instructions to prompt (only for phonetic matching, not as context)
+      const keywords = deepgramKeyterms || '';
+      console.log('🔑 Keywords loaded:', keywords);
+      const langDisplay = responseLanguage ? `${responseLanguage} Language` : 'your preferred language';
+      const keywordNote = keywords.trim()
+        ? `\n\n[KEYWORD MATCHING RULES:
+- The user may mispronounce these keywords: ${keywords}
+- If a word SOUNDS (when we speak that word) like one of these keywords, REPLACE ONLY that word with the correct keyword
+- Example: "jantic" sounds like "agentic" → replace only "jantic" with "agentic"
+- Example: "uberates" sounds like "Kubernetes" → replace only "uberates" with "Kubernetes"
+- DO NOT replace or question the other words in the sentence
+
+CONFIDENCE RULES:
+- After replacing, answer CONFIDENTLY from the VERY FIRST sentence
+- NEVER say: "I believe", "I assume", "You might be referring to", "However", "But I think", "If you meant"
+- If you replaced a word, act as if the user said the correct word clearly
+- Give direct answer immediately - no intro phrases like "Based on my knowledge"
+
+Respond in ${langDisplay}.]`
+        : `\n\n[CONFIDENCE RULES:
+- Answer CONFIDENTLY from the FIRST sentence
+- NEVER say: "I believe", "I assume", "You might be referring to", "However", "But I think", "If you meant"
+- Give direct answer immediately - no intro phrases like "Based on my knowledge"
+
+QUESTION_CLASSIFICATION:
+- If the question is RELATED to previous topic (follow-up, clarification, deeper dive): Answer IN CONTEXT of previous discussion
+- If the question is COMPLETELY NEW (different topic, no relation): Answer independently without referencing previous topic
+
+Respond in ${langDisplay}.]`;
+      console.log('📝 Keyword note:', keywordNote ? 'ADDED' : 'EMPTY');
+      
+      const fullPrompt = `${keywordNote}${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
 
       console.log('📊 Context Prompt Stats:');
       console.log('  - Base Prompt:', basePrompt.length, 'chars');
@@ -1966,7 +2019,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       console.log('✅ Streaming complete, total chars:', streamedText.length);
 
       // Save to history (Gemini format for storage)
-      const newUserMessage = { role: 'user', parts: [{ text: fullPrompt }] };
+      // Only store the actual user question, NOT the full prompt
+      const newUserMessage = { role: 'user', parts: [{ text: questionToAnswer }] };
       const newAIMessage = { role: 'model', parts: [{ text: streamedText }] };
       const updatedHistoryWithResponse = [...chatHistory, newUserMessage, newAIMessage];
       setChatHistory(updatedHistoryWithResponse);
@@ -2354,7 +2408,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 }}
                 className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
               >
-                <option value="default">Default (Python Google Speech)</option>
+                <option value="default">DEFAULT (Google speech)</option>
                 <option value="deepgram">Deepgram API</option>
               </select>
             </div>
@@ -2515,15 +2569,13 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
             </label>
             <input
               type="text"
-              value={settings.responseLanguage || 'ENGLISH'}
+              value={settings.responseLanguage || ''}
               onChange={(e) => {
-                const newLang = e.target.value.toUpperCase();
-                setSettings(prev => ({ ...prev, responseLanguage: newLang }));
+                setSettings(prev => ({ ...prev, responseLanguage: e.target.value }));
               }}
               onBlur={(e) => {
-                const newLang = e.target.value.toUpperCase();
+                const newLang = e.target.value;
                 setSettings(prev => ({ ...prev, responseLanguage: newLang }));
-                // Save to backend on blur
                 fetch(`${API_BASE_URL}/api/auth/settings`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
@@ -2541,16 +2593,15 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                   }
                 }).catch(err => console.error('Failed to save response language:', err));
               }}
-              placeholder="e.g., ENGLISH, URDU, HINDI"
-              className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500 uppercase"
+              className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
             />
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
-              Enter the language for AI responses (auto-converted to uppercase)
+              Enter the language for AI responses (e.g. English, Spanish)
             </p>
           </div>
 
-          {/* Important Keywords for Recognition (only shown when deepgram + English is selected) */}
-          {voiceProvider === 'deepgram' && ENGLISH_LANG_CODES.includes(deepgramLanguage) && (
+          {/* Important Keywords for Recognition (shown for both Deepgram and Default) */}
+          {(voiceProvider === 'deepgram' || voiceProvider === 'default') && (
             <div className="mt-6">
               <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
                 Important Keywords (Optional)
@@ -2563,7 +2614,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
               />
               <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
-                🔑 Add comma-separated technical terms, names, or jargon for better recognition (e.g., "PostgreSQL, Redis, FastAPI")
+                🔑 Add comma-separated technical terms, names, or jargon for better recognition and responsse.
               </p>
               <button
                 onClick={async () => {
@@ -2583,8 +2634,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                       localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                       console.log('🔑 [App] Deepgram keyterms saved to DB');
                       
-                      // Re-initialize voice provider with new keyterms in Electron
-                      if (typeof window !== 'undefined' && (window as any).require) {
+                      // Re-initialize voice provider with new keyterms in Electron (only for deepgram)
+                      if (voiceProvider === 'deepgram' && typeof window !== 'undefined' && (window as any).require) {
                         const { ipcRenderer } = (window as any).require('electron');
                         ipcRenderer.send('init-voice-provider', {
                           voiceProvider: 'deepgram',
@@ -2648,7 +2699,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="text-sm font-bold">Using Default Voice Recognition (Python + Google Speech API)</span>
+              <span className="text-sm font-bold">Using Default Voice Recognition (Google Speech)</span>
             </div>
           )}
         </div>
@@ -2704,6 +2755,16 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 <AutoExpandTextarea
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
+                  onBlur={() => {
+                    // Auto-save on blur
+                    if (user._id) {
+                      fetch(`${API_BASE_URL}/api/auth/settings`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: user._id, settings: { jobDescription } })
+                      }).catch(err => console.error('Failed to save JD:', err));
+                    }
+                  }}
                   placeholder="Paste the job description here..."
                   minHeight="120px"
                   maxHeight="400px"
@@ -2721,6 +2782,16 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 <AutoExpandTextarea
                   value={companyInfo}
                   onChange={(e) => setCompanyInfo(e.target.value)}
+                  onBlur={() => {
+                    // Auto-save on blur
+                    if (user._id) {
+                      fetch(`${API_BASE_URL}/api/auth/settings`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: user._id, settings: { companyInfo } })
+                      }).catch(err => console.error('Failed to save Company Info:', err));
+                    }
+                  }}
                   placeholder="Add company details..."
                   minHeight="120px"
                   maxHeight="400px"
@@ -2819,10 +2890,10 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Generating Summaries...
+                  Summarizing...
                 </span>
               ) : (
-                '🤖 Generate AI Summaries'
+                '🤖 Summarize & Store'
               )}
                   </button>
             
@@ -3028,7 +3099,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 </div>
             </div>
             
-              {/* Search Bar + Buttons */}
+{/* Search Bar + Buttons */}
               <div className="flex flex-col sm:flex-row gap-3">
                 <textarea
                   ref={questionInputRef}
@@ -3039,33 +3110,26 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                     } else {
                       setManualTextInput(e.target.value);
                     }
-                    // Auto-expand textarea
                     e.target.style.height = 'auto';
                     e.target.style.height = e.target.scrollHeight + 'px';
                   }}
                   placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
                   onKeyDown={(e) => {
-                    // Ctrl+Backspace - Clear only the question field
                     if (e.ctrlKey && e.key === 'Backspace') {
                       e.preventDefault();
-                      console.log('⌨️ Ctrl+Backspace pressed - Clearing question field only');
                       setManualTextInput('');
                       setTranscribedText('');
                       setCommittedText('');
                       setInterimText('');
                       e.currentTarget.style.height = 'auto';
                     }
-                    // Enter (without Shift) - Submit question
                     else if (e.key === 'Enter' && !e.shiftKey && !isListening) {
                       e.preventDefault();
                       if (!isGenerating && manualTextInput.trim()) {
-                        // Blur the input field after submitting (so arrows work immediately)
                         e.currentTarget.blur();
-                        console.log('⌨️ Enter pressed - Submitting and unfocusing input');
                         handleGetAnswer();
                       }
                     }
-                    // Shift+Enter - New line (default behavior, just allow it)
                   }}
                   rows={1}
                   className={`w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] ${
@@ -3074,12 +3138,11 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                   style={{ lineHeight: '1.5' }}
                 />
 
-                {/* Buttons row - below on mobile, inline on desktop */}
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-col gap-2">
                   <button 
                     onClick={isListening ? handleStopListen : handleStartListen}
                     disabled={isGenerating}
-                    className={`flex-1 sm:flex-none px-4 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+                    className={`px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
                       isListening
                         ? 'bg-red-600 hover:bg-red-700 text-white'
                         : 'bg-green-600 hover:bg-green-700 text-white'
@@ -3090,14 +3153,13 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 
                   <button 
                     onClick={() => {
-                      // Blur any focused input so arrows work immediately
                       if (document.activeElement instanceof HTMLElement) {
                         document.activeElement.blur();
                       }
                       handleGetAnswer();
                     }}
                     disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-                    className={`flex-1 sm:flex-none px-4 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all bg-blue-600 hover:bg-blue-700 text-white ${
+                    className={`px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all bg-blue-600 hover:bg-blue-700 text-white ${
                       isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
                         ? 'opacity-50'
                         : ''
@@ -3106,7 +3168,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                     {isGenerating ? 'Generating...' : 'Get Answer'}
                   </button>
                 </div>
-            </div>
+              </div>
                 </div>
 
             {/* AI Response */}

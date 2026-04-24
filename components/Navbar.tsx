@@ -139,6 +139,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       </div>
                     )}
                     
+                    {/* Theme Toggle */}
+                    <button
+                      onClick={toggleDarkMode}
+                      className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all"
+                      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                    >
+                      {isDarkMode ? (
+                        <span className="text-lg">☀️</span>
+                      ) : (
+                        <span className="text-lg">🌙</span>
+                      )}
+                    </button>
+                    
                     <span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">
                       Welcome, <span className="text-black dark:text-white font-bold">{user.name}</span>
                     </span>
@@ -161,6 +174,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       New Session
                       </button>
                     )}
+                    
+                    {/* Theme Toggle */}
+                    <button
+                      onClick={toggleDarkMode}
+                      className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all"
+                      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                    >
+                      {isDarkMode ? (
+                        <span className="text-lg">☀️</span>
+                      ) : (
+                        <span className="text-lg">🌙</span>
+                      )}
+                    </button>
                     
                     {/* Tokens Display */}
                     {user && (

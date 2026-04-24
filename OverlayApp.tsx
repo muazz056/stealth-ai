@@ -65,60 +65,45 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
   );
 };
 
-const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
-
-TOP PRIORITIES:
-Respond in {LANGUAGE} Language.
+    const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
  
 CONTEXT RULES:
 1. Document = single source of truth
-- Use ONLY mentioned skills, experience, projects, education
+- Use mentioned skills, experience, projects, education
 - NEVER invent, exaggerate, or assume
 2. Description provided = align answers directly to it
 3. Info provided = tailor responses accordingly
 4. No context = use best practices
 
 ANSWER STRUCTURE:
-- Professional, confident tone
+- Professional, confident tone , important information first
 
 TRANSCRIPTION ROBUSTNESS:
 - Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
-- If words appear inside asterisks * *, completely ignore those words (just sounds)
 - Intelligently analyze intent using provided context
-
-TERM CORRECTION:
-- If a word/phrase doesn't make technical or contextual sense:
-- Treat it as possible phonetic error from speech-to-text
-- Infer the most likely correct technical term
-- Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
 - If multiple interpretations possible:
-- Choose most likely one based on context
-- Answer directly without asking clarifying questions
-- If term cannot be reasonably inferred:
-- Ignore unclear term and answer rest intelligently
+- Choose most likely one based on context (Job description or resume)
+- Answer directly without asking clarifying questions or mentioning in the response.
+
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain correction process
+- Never mention you are AI or language model
 - Answer confidently as if question was clearly spoken
 
 CODING/TECHNICAL QUESTIONS:
 - Provide correct, clean code or technical explanation
-- Keep minimal but complete
-- Explain approach if necessary
+- Explain each approach if necessary
 
 EXAMPLES:
-- Give examples ONLY when improve clarity
-
-BEHAVIOR:
-- This is a LIVE conversation
-- If unclear, infer intent and answer directly
-- Never mention you are AI
+- Give examples to improve clarity
 
 OUTPUT:
 - No emojis
+-Important information first, then details
 - Use markdown for formatting when helpful`;
 
 const LS_BASE_PROMPT_KEY = 'isa_base_prompt';
@@ -1693,12 +1678,45 @@ const OverlayApp: React.FC = () => {
         : savedBasePrompt;
       
       // Inject response language into prompt
-      const responseLanguage = overlayUserSettings?.responseLanguage || 'English';
+      const responseLanguage = overlayUserSettings?.responseLanguage || '';
+      
+      // Add keyword instructions to prompt (only for phonetic matching, not as context)
+      const keywords = overlayUserSettings?.deepgramKeyterms || '';
+      const langDisplay = responseLanguage ? `${responseLanguage} Language` : 'your preferred language';
+      const keywordNote = keywords.trim()
+        ? `\n\n[KEYWORD MATCHING RULES:
+- The user may mispronounce these keywords: ${keywords}
+- If a word SOUNDS like one of these keywords, REPLACE ONLY that word with the correct keyword
+- Example: "jantic" sounds like "agentic" → replace only "jantic" with "agentic"
+- Example: "uberates" sounds like "Kubernetes" → replace only "uberates" with "Kubernetes"
+- DO NOT replace or question the other words in the sentence
+
+CONFIDENCE RULES:
+- After replacing, answer CONFIDENTLY from the FIRST sentence
+- NEVER say: "I believe", "I assume", "You might be referring to", "However", "But I think", "If you meant"
+- If you replaced a word, act as if the user said the correct word clearly
+- Give direct answer immediately - no intro phrases like "Based on my knowledge"
+
+Respond in ${langDisplay}.]`
+          : (responseLanguage 
+            ? `\n\n[CONFIDENCE RULES:
+- Answer CONFIDENTLY from the FIRST sentence
+- NEVER say: "I believe", "I assume", "You might be referring to", "However", "But I think", "If you meant"
+- Give direct answer immediately - no intro phrases like "Based on my knowledge"
+
+QUESTION_CLASSIFICATION:
+- If the question is RELATED to previous topic (follow-up, clarification, deeper dive): Answer IN CONTEXT of previous discussion
+- If the question is COMPLETELY NEW (different topic, no relation): Answer independently without referencing previous topic
+
+Respond in ${langDisplay}.]`
+            : '');
+      
+      // Replace {LANGUAGE} placeholder in base prompt if exists
       contextPrompt = contextPrompt.replace(/\{LANGUAGE\}/g, responseLanguage);
       
-      // Ensure language instruction is always present
-      if (!contextPrompt.includes('Respond in')) {
-        contextPrompt = `Respond in ${responseLanguage} Language.\n\n` + contextPrompt;
+      // Ensure language instruction is always present (if no keywordNote added)
+      if (!contextPrompt.includes('Respond in') && !keywordNote) {
+        contextPrompt = `Respond in ${responseLanguage || 'English'} Language.\n\n` + contextPrompt;
       }
       
       // Use summaries for fast responses (fallback to full text, lightly truncated)
@@ -1725,7 +1743,7 @@ const OverlayApp: React.FC = () => {
         contextPrompt += `\n\nCompany Information (truncated):\n${truncate(savedCompanyInfo)}`;
       }
 
-      const prompt = `${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
+      const fullPrompt = `${keywordNote}${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
 
       let streamedText = '';
 
@@ -1743,14 +1761,14 @@ const OverlayApp: React.FC = () => {
           role: msg.role,
           parts: msg.parts || [{ text: msg.content || '' }]
         }));
-        apiMessages.push({ role: 'user', parts: [{ text: prompt }] });
+        apiMessages.push({ role: 'user', parts: [{ text: fullPrompt }] });
       } else {
         // OpenAI/Claude/Groq format
         apiMessages = trimmedHistory.map((msg: any) => ({
           role: msg.role === 'model' ? 'assistant' : msg.role,
           content: msg.parts?.[0]?.text || msg.content || ''
         }));
-        apiMessages.push({ role: 'user', content: prompt });
+        apiMessages.push({ role: 'user', content: fullPrompt });
       }
 
       // Use streaming endpoint
@@ -1811,7 +1829,8 @@ const OverlayApp: React.FC = () => {
       console.log('✅ Overlay: Streaming complete, total chars:', streamedText.length);
 
       // Save to history (Gemini format for storage)
-      const newUserMessage = { role: 'user', parts: [{ text: prompt }] };
+      // Only store the actual user question, NOT the full prompt
+      const newUserMessage = { role: 'user', parts: [{ text: questionToAnswer }] };
       const newModelMessage = { role: 'model', parts: [{ text: streamedText }] };
       const updatedHistoryWithResponse = [...chatHistory, newUserMessage, newModelMessage];
       setChatHistory(updatedHistoryWithResponse);
@@ -2589,21 +2608,15 @@ ${companyInfoSummary}`;
                 } else {
                   setManualTextInput(e.target.value);
                 }
-                // Auto-expand textarea
                 e.target.style.height = 'auto';
                 e.target.style.height = e.target.scrollHeight + 'px';
               }}
               placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
             onKeyDown={(e) => {
-              // Enter (without Shift) - Submit question
               if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // Always prevent new line
-                
+                e.preventDefault();
                 if (isListening) {
-                  // If listening, stop and submit
-                  console.log('⌨️ Enter pressed while listening - Stop and submit');
                   handleStopListen();
-                  // Submit after short delay
                   setTimeout(() => {
                     if (!isGenerating && (manualTextInput.trim() || transcribedText.trim())) {
                       e.currentTarget?.blur();
@@ -2611,13 +2624,10 @@ ${companyInfoSummary}`;
                     }
                   }, 300);
                 } else if (!isGenerating && manualTextInput.trim()) {
-                  // Not listening and has text - submit
                   e.currentTarget.blur();
-                  console.log('⌨️ Enter pressed - Submitting and unfocusing input');
                   handleGetAnswer();
                 }
               }
-              // Shift+Enter - New line (default behavior)
             }}
             rows={1}
             className={`w-full bg-gray-800/20 border border-blue-400/30 rounded-2xl px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/60 resize-none overflow-hidden min-h-[40px] max-h-[150px] backdrop-blur-lg shadow-inner ${
@@ -2627,11 +2637,11 @@ ${companyInfoSummary}`;
           />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-col gap-2">
             <button
               onClick={isListening ? handleStopListen : handleStartListen}
               disabled={isGenerating}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
+              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
                 isListening
                   ? 'bg-red-500/40 hover:bg-red-500/60 text-white border-red-400/50 shadow-red-500/50'
                   : 'bg-green-500/40 hover:bg-green-500/60 text-white border-green-400/50 shadow-green-500/50'
@@ -2643,14 +2653,13 @@ ${companyInfoSummary}`;
 
             <button
               onClick={() => {
-                // Blur any focused input so arrows work immediately
                 if (document.activeElement instanceof HTMLElement) {
                   document.activeElement.blur();
                 }
                 handleGetAnswer();
               }}
               disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
+              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
                 isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
                   ? 'opacity-50'
                   : ''

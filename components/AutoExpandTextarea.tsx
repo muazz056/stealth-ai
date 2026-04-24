@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from 'react';
 interface AutoExpandTextareaProps {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onBlur?: () => void;
   placeholder?: string;
   className?: string;
   minHeight?: string;
@@ -13,6 +14,7 @@ interface AutoExpandTextareaProps {
 const AutoExpandTextarea: React.FC<AutoExpandTextareaProps> = ({
   value,
   onChange,
+  onBlur,
   placeholder = '',
   className = '',
   minHeight = '80px',
@@ -50,6 +52,7 @@ const AutoExpandTextarea: React.FC<AutoExpandTextareaProps> = ({
         onChange(e);
         autoResize();
       }}
+      onBlur={onBlur}
       placeholder={placeholder}
       disabled={disabled}
       className={`w-full p-3 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-black dark:text-white text-sm focus:border-blue-500 focus:outline-none resize-none overflow-y-auto transition-all ${className}`}
