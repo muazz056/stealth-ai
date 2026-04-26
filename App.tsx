@@ -337,7 +337,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     } catch (e) {}
     return '';
   });
-  const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
+const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const [showSettingsSaved, setShowSettingsSaved] = useState(false);
   const [showContextSaved, setShowContextSaved] = useState(false);
   const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
@@ -1360,15 +1360,29 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     setAiResponse('');
     wantToListenRef.current = true;
     
-    if (isElectronRef.current) {
+if (isElectronRef.current) {
       // Electron: Use Python Bridge
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
       console.log('🎤 VOICE: Python Bridge (Deepgram via Python)');
       
-} else if (voiceProvider === 'deepgram' && deepgramApiKey) {
+    } else if (voiceProvider === 'deepgram' && deepgramApiKey) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Audio constraints optimized for capturing speaker audio (YouTube, meeting apps)
+        // - echoCancellation: false - Don't filter out speaker audio
+        // - noiseSuppression: false - Capture low sounds
+        // - autoGainControl: false - Don't auto-adjust volume
+        // - sampleRate: 16000 - Good for speech recognition
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+            sampleRate: 16000,
+            sampleSize: 16,
+          }
+        });
         deepgramAudioRef.current = stream;
         
         const mediaRecorder = new MediaRecorder(stream);
@@ -2412,6 +2426,19 @@ Respond in ${langDisplay}.]`;
                 <option value="deepgram">Deepgram API</option>
               </select>
             </div>
+
+            {/* Optimized Audio Capture (always on - captures speaker audio) */}
+            {/* <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-purple-700 dark:text-purple-400">Speaker Audio Capture</h4>
+                  <p className="text-xs text-purple-600 dark:text-purple-500 mt-1">
+                    Optimized for YouTube, Zoom, Meet, Teams - speak loudly for best results
+                  </p>
+                </div>
+                <span className="text-xs font-bold text-purple-600 bg-purple-500/20 px-2 py-1 rounded">AUTO</span>
+              </div>
+            </div> */}
             
             {/* Deepgram API Key Input (only shown when deepgram is selected) */}
             {voiceProvider === 'deepgram' && (
