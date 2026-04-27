@@ -476,6 +476,12 @@ const OverlayApp: React.FC = () => {
   const isElectronRef = useRef(false);
   const ipcRendererRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const deepgramWsRef = useRef<WebSocket | null>(null);
+  const deepgramAudioRef = useRef<MediaStream | null>(null);
+  const displayCaptureStreamRef = useRef<MediaStream | null>(null);
+  const micCaptureStreamRef = useRef<MediaStream | null>(null);
+  const audioLevelIntervalRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const inputFieldRef = useRef<HTMLTextAreaElement>(null); // For auto-focus and auto-resize
   const analyzeScreenRef = useRef<(() => Promise<void>) | null>(null); // For shortcut access
@@ -484,6 +490,18 @@ const OverlayApp: React.FC = () => {
   const transcribedTextRef = useRef(''); // For IPC handler access
   const manualTextInputRef = useRef(''); // For IPC handler access
   const toggleBrowseAIRef = useRef<(() => void) | null>(null); // For Ctrl+[ shortcut
+  const overlayLog = (...parts: any[]) => {
+    const message = parts
+      .map((p) => (typeof p === 'string' ? p : (() => { try { return JSON.stringify(p); } catch { return String(p); } })()))
+      .join(' ');
+    try {
+      if (typeof window !== 'undefined' && (window as any).require) {
+        const { ipcRenderer } = (window as any).require('electron');
+        ipcRenderer.send('overlay-log', message);
+      }
+    } catch (e) {}
+    console.log('[OVERLAY]', ...parts);
+  };
 
   // Helper functions to hide/show browser when modals open
   const hideBrowserForModal = () => {
@@ -1021,24 +1039,8 @@ const OverlayApp: React.FC = () => {
           
           // Stop speech recognition
           if (isElectronRef.current) {
-            console.log('🐍 Sending python-stop-listen IPC');
-            ipcRendererRef.current?.send('python-stop-listen');
-            
-            // Transfer transcribed text to input using refs
-            const currentText = transcribedTextRef.current.trim();
-            setIsListening(false);
-            isStartedRef.current = false;
-            
-            if (currentText.length > 0) {
-              const newText = (manualTextInputRef.current + ' ' + currentText).trim();
-              setManualTextInput(newText);
-              manualTextInputRef.current = newText;
-            }
-            setTranscribedText('');
-            setCommittedText('');
-            setInterimText('');
-            transcribedTextRef.current = '';
-            
+            console.log('🛑 Stopping voice capture in Electron');
+            handleStopListen();
           } else if (recognitionRef.current) {
             console.log('🌐 Stopping Web Speech API');
             try { 
@@ -1062,12 +1064,8 @@ const OverlayApp: React.FC = () => {
           wantToListenRef.current = true;
           
           if (isElectronRef.current) {
-            // Electron: Use Python Bridge
-            ipcRendererRef.current?.send('python-start-listen');
-            setIsListening(true);
-            isStartedRef.current = true;
-            console.log('🐍 Started Python speech recognition via shortcut');
-            
+            console.log('🎤 Starting voice capture in Electron');
+            handleStartListen();
           } else if (recognitionRef.current) {
             // Browser: Use Web Speech API
             try {
@@ -1118,7 +1116,7 @@ const OverlayApp: React.FC = () => {
           
           // Stop speech recognition
           if (isElectronRef.current) {
-            ipcRendererRef.current?.send('python-stop-listen');
+            handleStopListen();
           } else if (recognitionRef.current) {
             try { recognitionRef.current.stop(); } catch (e) {}
           }
@@ -1388,19 +1386,282 @@ const OverlayApp: React.FC = () => {
 
   // Start Listen
   const handleStartListen = async () => {
+    overlayLog('handleStartListen called', {
+      isElectron: isElectronRef.current,
+      provider: currentVoiceProvider,
+      listening: isListening
+    });
     setTranscribedText('');
     setCommittedText('');
     setInterimText('');
     // Don't clear manualTextInput - keep existing typed text
     setAiResponse('');
     
+    const startDeepgramRecorder = async (stream: MediaStream, apiKey: string, language: string) => {
+      deepgramAudioRef.current = stream;
+      overlayLog('Deepgram recorder start. Track count:', stream.getAudioTracks().length);
+      const preferredMime =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : undefined;
+      overlayLog('MediaRecorder mime selected:', preferredMime || 'browser-default');
+      const mediaRecorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
+      mediaRecorderRef.current = mediaRecorder;
+
+      const ws = new WebSocket(
+        `${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(language || 'en-US')}`
+      );
+      deepgramWsRef.current = ws;
+
+      ws.onopen = () => {
+        overlayLog('Deepgram WS open');
+        let chunkCount = 0;
+        let byteCount = 0;
+        mediaRecorder.start(1000);
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+            chunkCount += 1;
+            byteCount += event.data.size;
+            if (chunkCount <= 3 || chunkCount % 5 === 0) {
+              overlayLog('Audio chunk', { chunkCount, size: event.data.size, totalBytes: byteCount });
+            }
+            ws.send(event.data);
+          } else if (chunkCount <= 3) {
+            overlayLog('Empty/unsent chunk', { size: event.data.size, wsState: ws.readyState });
+          }
+        };
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'connected') {
+            overlayLog('Proxy connected to Deepgram');
+          }
+          if (data.type === 'error') {
+            overlayLog('Deepgram proxy error', data.message);
+            console.error('Deepgram error:', data.message);
+            return;
+          }
+          if (data.channel) {
+            const transcript = data.channel?.alternatives?.[0]?.transcript;
+            if (transcript) {
+              if (data.is_final) {
+                setCommittedText((prev) => (prev + ' ' + transcript).trim());
+                setInterimText('');
+                overlayLog('Final transcript received', transcript);
+              } else {
+                setInterimText(transcript);
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore malformed ws frames
+        }
+      };
+      ws.onerror = (event) => {
+        overlayLog('Deepgram WS error', String((event as any)?.message || 'unknown'));
+      };
+
+      ws.onclose = () => {
+        overlayLog('Deepgram WS closed');
+        try {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        } catch (e) {}
+      };
+
+      try {
+        const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AC) {
+          const ctx = audioContextRef.current || new AC();
+          audioContextRef.current = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          source.connect(analyser);
+          const dataArray = new Uint8Array(analyser.fftSize);
+          audioLevelIntervalRef.current = window.setInterval(() => {
+            analyser.getByteTimeDomainData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              const v = (dataArray[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / dataArray.length);
+            overlayLog('System audio RMS', Number(rms.toFixed(4)));
+          }, 2000);
+        }
+      } catch (meterErr) {
+        overlayLog('Audio meter setup failed', String(meterErr));
+      }
+    };
+
+    const getOverlayDeepgramConfig = () => {
+      try {
+        const userStr = localStorage.getItem(LS_USER_KEY);
+        if (!userStr) return null;
+        const user = JSON.parse(userStr);
+        const apiKey = (user.deepgramApiKey || '').trim();
+        if (!apiKey) return null;
+        return {
+          apiKey,
+          language: user.deepgramLanguage || currentLanguage || 'en-US',
+        };
+      } catch (e) {
+        return null;
+      }
+    };
+
+    // Check voiceProvider from localStorage to handle race conditions with settings-updated event
+    const voiceProviderFromStorage = (() => {
+      try {
+        const userStr = localStorage.getItem(LS_USER_KEY);
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          return user.voiceProvider || 'default';
+        }
+      } catch (e) {}
+      return 'default';
+    })();
+
+    if (isElectronRef.current && (currentVoiceProvider === 'deepgram' || voiceProviderFromStorage === 'deepgram')) {
+      const deepgramConfig = getOverlayDeepgramConfig();
+      if (!deepgramConfig) {
+        console.error('❌ Deepgram selected but API key is missing');
+        setIsListening(false);
+        isStartedRef.current = false;
+        setAiResponse('Deepgram is selected, but API key is missing. Add key in settings and try again.');
+        return;
+      } else {
+        try {
+          // Electron system audio capture path (no picker when main process configures display media handler)
+          let stream: MediaStream | null = null;
+          try {
+            // Attempt 1: Electron desktopCapturer + chromeMediaSource constraints (no picker)
+            let captured = false;
+            if ((window as any).require) {
+              const { desktopCapturer } = (window as any).require('electron');
+              if (desktopCapturer?.getSources) {
+                overlayLog('Attempt 1: desktopCapturer.getSources + getUserMedia(chromeMediaSource)');
+                const sources = await desktopCapturer.getSources({
+                  types: ['screen'],
+                  thumbnailSize: { width: 0, height: 0 }
+                });
+                overlayLog('desktop sources count', sources?.length || 0);
+                if (sources && sources.length > 0) {
+                  const sourceId = sources[0].id;
+                  const chromeStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                      mandatory: {
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: sourceId,
+                      },
+                    } as any,
+                    video: false as any,
+                  } as any);
+                  const tracks = chromeStream.getAudioTracks();
+                  if (tracks && tracks.length > 0) {
+                    stream = chromeStream;
+                    captured = true;
+                    overlayLog('Attempt 1 success', tracks.map((t) => t.label).join(' | '));
+                  } else {
+                    try { chromeStream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+                    overlayLog('Attempt 1 returned no audio tracks');
+                  }
+                }
+              }
+            }
+
+            // Attempt 2: getDisplayMedia routed by main setDisplayMediaRequestHandler
+            if (!captured) {
+              overlayLog('Attempt 2: getDisplayMedia({video:true,audio:true})');
+              const displayStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: {
+                  echoCancellation: false,
+                  noiseSuppression: false,
+                  autoGainControl: false,
+                } as MediaTrackConstraints,
+              });
+              displayCaptureStreamRef.current = displayStream;
+
+              const audioTracks = displayStream.getAudioTracks();
+              if (!audioTracks || audioTracks.length === 0) {
+                throw new Error('No system-audio track returned by getDisplayMedia');
+              }
+              stream = new MediaStream(audioTracks);
+              overlayLog('Attempt 2 success', audioTracks.map((t) => t.label).join(' | '));
+            }
+
+            // Also capture microphone and mix with system audio so both are transcribed.
+            const micStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+            });
+            micCaptureStreamRef.current = micStream;
+            overlayLog('Mic capture success', micStream.getAudioTracks().map((t) => t.label).join(' | '));
+
+            const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+            if (!AC) {
+              throw new Error('AudioContext unavailable for stream mixing');
+            }
+            const mixCtx = new AC();
+            audioContextRef.current = mixCtx;
+            const systemSource = mixCtx.createMediaStreamSource(stream);
+            const micSource = mixCtx.createMediaStreamSource(micStream);
+            const systemGain = mixCtx.createGain();
+            const micGain = mixCtx.createGain();
+            const destination = mixCtx.createMediaStreamDestination();
+            systemGain.gain.value = 1.0;
+            micGain.gain.value = 1.15;
+            systemSource.connect(systemGain).connect(destination);
+            micSource.connect(micGain).connect(destination);
+            stream = destination.stream;
+            overlayLog('Mixed stream created (system + mic)');
+          } catch (captureErr) {
+            overlayLog('System audio capture unavailable in Electron', String(captureErr));
+            console.error('❌ System audio capture unavailable in Electron:', captureErr);
+            setIsListening(false);
+            isStartedRef.current = false;
+            setAiResponse(
+              'System audio capture failed in Electron (both desktopCapturer and getDisplayMedia paths). No microphone fallback was used.'
+            );
+            return;
+          }
+
+          if (!stream) {
+            throw new Error('No stream available');
+          }
+
+          await startDeepgramRecorder(stream, deepgramConfig.apiKey, deepgramConfig.language);
+          setIsListening(true);
+          isStartedRef.current = true;
+          overlayLog('Started Deepgram in Electron renderer');
+          return;
+        } catch (e) {
+          overlayLog('Failed to start Deepgram in Electron', String(e));
+          console.error('❌ Failed to start Deepgram in Electron:', e);
+          setIsListening(false);
+          isStartedRef.current = false;
+          setAiResponse('Failed to start Electron system-audio streaming to Deepgram. No mic fallback was used.');
+          return;
+        }
+      }
+    }
+
     if (isElectronRef.current) {
-      // Electron: Use Python Bridge (Google Speech API - FREE & REAL-TIME!)
+      // Electron fallback: Python/bridge provider path
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
       isStartedRef.current = true; // Set ref for shortcut detection
-      console.log('🐍 Started Python speech recognition (real-time, free!)');
-      
+      console.log('🐍 Started Python speech recognition (fallback)');
     } else if (recognitionRef.current) {
       // Browser: Use Web Speech API
       isStartedRef.current = true;
@@ -1416,6 +1677,60 @@ const OverlayApp: React.FC = () => {
   };
 
   const handleStopListen = () => {
+    if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current) {
+      const currentText = transcribedText.trim();
+      isStartedRef.current = false;
+      setIsListening(false);
+
+      try {
+        if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {
+          deepgramWsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+        }
+      } catch (e) {}
+
+      try { deepgramWsRef.current?.close(); } catch (e) {}
+      deepgramWsRef.current = null;
+
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (e) {}
+      mediaRecorderRef.current = null;
+
+      try {
+        deepgramAudioRef.current?.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+      deepgramAudioRef.current = null;
+      try {
+        if (audioLevelIntervalRef.current !== null) {
+          window.clearInterval(audioLevelIntervalRef.current);
+          audioLevelIntervalRef.current = null;
+        }
+      } catch (e) {}
+      try {
+        audioContextRef.current?.close();
+      } catch (e) {}
+      audioContextRef.current = null;
+      try {
+        displayCaptureStreamRef.current?.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+      displayCaptureStreamRef.current = null;
+      try {
+        micCaptureStreamRef.current?.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+      micCaptureStreamRef.current = null;
+
+      if (currentText.length > 0) {
+        setManualTextInput((prev) => (prev + ' ' + currentText).trim());
+      }
+      setTranscribedText('');
+      setCommittedText('');
+      setInterimText('');
+      console.log('🎤 Stopped Deepgram speech recognition (overlay)');
+      return;
+    }
+
     if (isElectronRef.current) {
       // Electron: Stop Python Bridge
       ipcRendererRef.current?.send('python-stop-listen');

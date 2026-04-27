@@ -12,7 +12,9 @@ export type ShortcutAction =
   | 'clearQuestion'
   | 'focusInput'
   | 'stopOrClear'
-  | 'toggleBrowseAI';
+  | 'toggleBrowseAI'
+  | 'toggleTranscription'
+  | 'stopGeneration';
 
 export interface ShortcutConfig {
   action: ShortcutAction;
@@ -54,39 +56,39 @@ export const getDefaultShortcuts = (): ShortcutsState => {
   return {
     toggleOverlay: {
       action: 'toggleOverlay',
-      label: 'Toggle Overlay',
-      description: 'Minimize/restore the overlay window',
+      label: 'Overlay Open/Close',
+      description: 'Open or close the overlay window',
       defaultKey: "'",
       modifier: primaryMod,
       key: "'"
     },
     toggleListen: {
       action: 'toggleListen',
-      label: 'Toggle Listen',
-      description: 'Start/stop voice recording',
+      label: 'Start/Stop Listen',
+      description: 'Start or stop voice recording',
       defaultKey: '\\',
       modifier: primaryMod,
       key: '\\'
     },
     analyzeScreen: {
       action: 'analyzeScreen',
-      label: 'Analyze Screen',
-      description: 'Capture and analyze screen content',
+      label: 'Screen Analyze',
+      description: 'Analyze current screen content',
       defaultKey: ']',
       modifier: primaryMod,
       key: ']'
     },
     getAnswer: {
       action: 'getAnswer',
-      label: 'Get Answer',
-      description: 'Submit question and get AI response',
+      label: 'Direct Answer',
+      description: 'Get an immediate AI response',
       defaultKey: 'Enter',
       modifier: primaryMod,
       key: 'Enter'
     },
     clearQuestion: {
       action: 'clearQuestion',
-      label: 'Clear Question',
+      label: 'Clear Field',
       description: 'Clear the question input field',
       defaultKey: 'Backspace',
       modifier: primaryMod,
@@ -94,7 +96,7 @@ export const getDefaultShortcuts = (): ShortcutsState => {
     },
     focusInput: {
       action: 'focusInput',
-      label: 'Focus Input',
+      label: 'Focus Field',
       description: 'Focus on the question input field',
       defaultKey: '',
       modifier: 'Shift',
@@ -102,19 +104,35 @@ export const getDefaultShortcuts = (): ShortcutsState => {
     },
     stopOrClear: {
       action: 'stopOrClear',
-      label: 'Stop/Clear All',
-      description: 'Stop AI generation or clear everything',
+      label: 'Clear All',
+      description: 'Stop AI generation and clear everything',
       defaultKey: 'Backspace',
       modifier: primaryMod,
       key: 'Backspace'
     },
     toggleBrowseAI: {
       action: 'toggleBrowseAI',
-      label: 'Toggle BrowseAI',
-      description: 'Open/close BrowseAI browser',
+      label: 'Open Browser',
+      description: 'Open the BrowseAI browser',
       defaultKey: '[',
       modifier: primaryMod,
       key: '['
+    },
+    toggleTranscription: {
+      action: 'toggleTranscription',
+      label: 'Toggle Transcription',
+      description: 'Enable or disable live transcription',
+      defaultKey: 'T',
+      modifier: primaryMod,
+      key: 'T'
+    },
+    stopGeneration: {
+      action: 'stopGeneration',
+      label: 'Stop Generation',
+      description: 'Stop the current AI generation',
+      defaultKey: 'Escape',
+      modifier: 'Alt',
+      key: 'Escape'
     }
   };
 };

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ModifierKey, normalizeKey, getModifierSymbol } from '../src/utils/shortcutsManager';
 
+type ModifierOption = ModifierKey | 'None';
+
 interface ShortcutRecorderProps {
   modifier: ModifierKey;
   currentKey: string;
   onModifierChange: (modifier: ModifierKey) => void;
   onKeyChange: (key: string) => void;
   label: string;
+  description?: string;
   error?: string;
 }
 
@@ -16,14 +19,21 @@ const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
   onModifierChange,
   onKeyChange,
   label,
+  description,
   error
 }) => {
   const [isRecording, setIsRecording] = useState(false);
-  const [recordedModifier, setRecordedModifier] = useState<ModifierKey | null>(null);
+  const [recordedModifier, setRecordedModifier] = useState<ModifierOption | null>(null);
   const [recordedKey, setRecordedKey] = useState<string>('');
   const inputRef = useRef<HTMLDivElement>(null);
 
-  const modifierOptions: ModifierKey[] = ['Control', 'Alt', 'Shift', 'Meta'];
+  const modifierOptions: { value: ModifierOption; label: string }[] = [
+    { value: 'None', label: 'None' },
+    { value: 'Control', label: `${getModifierSymbol('Control')} (Ctrl)` },
+    { value: 'Alt', label: `${getModifierSymbol('Alt')} (Alt)` },
+    { value: 'Shift', label: `${getModifierSymbol('Shift')} (Shift)` },
+    { value: 'Meta', label: `${getModifierSymbol('Meta')} (Cmd)` },
+  ];
 
   const handleStartRecording = () => {
     setIsRecording(true);
@@ -40,35 +50,58 @@ const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
 
     const { modifier: eventModifier, key: eventKey } = normalizeKey(e.nativeEvent);
 
-    // First, capture modifier
+    if (!eventModifier && eventKey) {
+      setRecordedModifier('None');
+      setRecordedKey(eventKey);
+      setTimeout(() => {
+        onModifierChange('Control');
+        onKeyChange(eventKey);
+        setIsRecording(false);
+      }, 300);
+      return;
+    }
+
+    if (recordedModifier === 'None' && eventKey) {
+      setRecordedKey(eventKey);
+      setTimeout(() => {
+        onModifierChange('Control');
+        onKeyChange(eventKey);
+        setIsRecording(false);
+      }, 300);
+      return;
+    }
+
     if (!recordedModifier && eventModifier) {
       setRecordedModifier(eventModifier);
       return;
     }
 
-    // If modifier is set and user presses it again, save as single-key shortcut
     if (recordedModifier && eventModifier === recordedModifier && !eventKey) {
       setRecordedKey('');
-      
-      // Auto-save single-key shortcut
       setTimeout(() => {
-        onModifierChange(recordedModifier);
+        onModifierChange(recordedModifier as ModifierKey);
         onKeyChange('');
         setIsRecording(false);
       }, 300);
       return;
     }
 
-    // Capture the second key (if modifier is already set and it's not the modifier itself)
     if (recordedModifier && eventKey && eventKey !== recordedModifier) {
       setRecordedKey(eventKey);
-      
-      // Auto-save after capturing both
       setTimeout(() => {
-        onModifierChange(recordedModifier);
+        onModifierChange(recordedModifier as ModifierKey);
         onKeyChange(eventKey);
         setIsRecording(false);
       }, 300);
+    }
+  };
+
+  const handleModifierSelect = (value: ModifierOption) => {
+    if (value === 'None') {
+      onModifierChange('Control');
+      onKeyChange('');
+    } else {
+      onModifierChange(value);
     }
   };
 
@@ -79,32 +112,47 @@ const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
   };
 
   const displayValue = isRecording
-    ? recordedModifier
+    ? recordedModifier === 'None'
       ? recordedKey 
-        ? `${getModifierSymbol(recordedModifier)}+${recordedKey}`
-        : `${getModifierSymbol(recordedModifier)} (press again for single-key or press another key)`
-      : 'Press modifier key...'
+        ? recordedKey
+        : 'Press a key...'
+      : recordedModifier
+        ? recordedKey 
+          ? `${getModifierSymbol(recordedModifier)}+${recordedKey}`
+          : `${getModifierSymbol(recordedModifier)} (press again for single-key or press another key)`
+        : 'Press modifier key...'
     : currentKey && currentKey.trim() !== ''
-      ? `${getModifierSymbol(modifier)}+${currentKey}`
-      : getModifierSymbol(modifier);
+      ? modifier === 'Control' && modifierOptions.find(o => o.value === 'None')
+        ? currentKey
+        : `${getModifierSymbol(modifier)}+${currentKey}`
+      : modifierOptions.find(o => o.value === modifier)?.label || modifier;
+
+  const effectiveModifier: ModifierOption = modifier === 'Control' && !currentKey ? 'None' : modifier;
 
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wide">
-        {label}
-      </label>
+      <div className="flex flex-col">
+        <label className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wide">
+          {label}
+        </label>
+        {description && (
+          <span className="text-[11px] text-slate-600 dark:text-slate-500 mt-0.5">
+            {description}
+          </span>
+        )}
+      </div>
       
       <div className="flex gap-2 items-center">
         {/* Modifier Dropdown */}
         <select
-          value={modifier}
-          onChange={(e) => onModifierChange(e.target.value as ModifierKey)}
+          value={effectiveModifier}
+          onChange={(e) => handleModifierSelect(e.target.value as ModifierOption)}
           disabled={isRecording}
           className="w-32 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-black dark:text-white text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50"
         >
           {modifierOptions.map((mod) => (
-            <option key={mod} value={mod}>
-              {getModifierSymbol(mod)} ({mod})
+            <option key={mod.value} value={mod.value}>
+              {mod.label}
             </option>
           ))}
         </select>

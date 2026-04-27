@@ -93,7 +93,7 @@ const TransparentOverlay: React.FC<TransparentOverlayProps> = ({ apiKey, resume,
   // Initialize Gemini AI
   useEffect(() => {
     if (apiKey) {
-      genAI.current = new GoogleGenAI(apiKey);
+      genAI.current = new GoogleGenAI({ apiKey });
     }
   }, [apiKey]);
 
@@ -173,24 +173,27 @@ const TransparentOverlay: React.FC<TransparentOverlayProps> = ({ apiKey, resume,
     setAiResponse({ answer: '', isLoading: true });
     
     try {
-      const model = genAI.current.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        systemInstruction: `You are an AI interview assistant. Provide concise, professional answers to interview questions. 
-        Keep responses under 100 words and focus on practical, actionable advice. 
-        The user is currently in an interview and needs quick, helpful responses.`
+      const gen = genAI.current;
+      if (!gen) throw new Error('AI not initialized');
+
+      const prompt = `You are an AI interview assistant. Provide concise, professional answers to interview questions. 
+Keep responses under 100 words and focus on practical, actionable advice. 
+The user is currently in an interview and needs quick, helpful responses.
+
+Interview Question/Context: "${transcription.streamingText}"
+
+Please provide a brief, professional answer that would be appropriate for a job interview. Focus on:
+- Key technical concepts if it's a technical question
+- Behavioral examples using STAR method if it's a behavioral question
+- Professional tone and confidence
+- Concise but complete response`;
+
+      const result = await gen.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt,
       });
-      
-      const prompt = `Interview Question/Context: "${transcription.streamingText}"
-      
-      Please provide a brief, professional answer that would be appropriate for a job interview. Focus on:
-      - Key technical concepts if it's a technical question
-      - Behavioral examples using STAR method if it's a behavioral question
-      - Professional tone and confidence
-      - Concise but complete response`;
-      
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+
+      const text = result.text || '';
       
       setAiResponse({ answer: text, isLoading: false });
     } catch (error) {

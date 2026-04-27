@@ -1719,19 +1719,42 @@ function setupDeepgramProxy(server) {
         '&interim_results=true&vad_events=true',
         { headers: { 'Authorization': 'Token ' + apiKey } }
       );
+      let clientChunkCount = 0;
+      let clientChunkBytes = 0;
+      let deepgramMessageCount = 0;
       
       dgWs.on('open', () => {
+        console.log('🎧 Deepgram proxy connected. language=', language);
         ws.send(JSON.stringify({ type: 'connected' }));
       });
       
-      dgWs.on('message', (data) => ws.send(data.toString()));
+      dgWs.on('message', (data) => {
+        deepgramMessageCount += 1;
+        if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
+          console.log(`📨 Deepgram message #${deepgramMessageCount}`);
+        }
+        ws.send(data.toString());
+      });
       dgWs.on('error', (err) => {
         console.error('Deepgram error:', err.message);
         ws.send(JSON.stringify({ type: 'error', message: err.message }));
       });
-      dgWs.on('close', (code, reason) => ws.close());
+      dgWs.on('close', (code, reason) => {
+        console.log(`🔌 Deepgram socket closed code=${code} reason=${reason?.toString?.() || ''}`);
+        ws.close();
+      });
       
       ws.on('message', (data) => {
+        const len = Buffer.isBuffer(data)
+          ? data.length
+          : data instanceof ArrayBuffer
+            ? data.byteLength
+            : (typeof data === 'string' ? data.length : 0);
+        clientChunkCount += 1;
+        clientChunkBytes += len;
+        if (clientChunkCount <= 3 || clientChunkCount % 5 === 0) {
+          console.log(`🎙️ Client audio chunk #${clientChunkCount}, bytes=${len}, total=${clientChunkBytes}`);
+        }
         // Handle binary audio data properly
         if (data instanceof Buffer || data instanceof ArrayBuffer) {
           if (dgWs.readyState === WebSocket.OPEN) dgWs.send(data);

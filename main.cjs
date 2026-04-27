@@ -807,13 +807,49 @@ function createMainWindow() {
     // Handle all permissions in main window
     mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
         console.log('Main window permission requested:', permission);
-        if (permission === 'microphone' || permission === 'media' || permission === 'camera') {
+        if (
+            permission === 'microphone' ||
+            permission === 'media' ||
+            permission === 'camera' ||
+            permission === 'display-capture' ||
+            permission === '' // Electron can emit empty permission while negotiating media capture.
+        ) {
             console.log('Granting permission for:', permission);
             callback(true);
         } else {
             callback(false);
         }
     });
+
+    // Auto-approve display media requests for main window without showing picker.
+    // This keeps main app behavior aligned with overlay capture flow.
+    try {
+        mainWindow.webContents.session.setDisplayMediaRequestHandler(async (request, callback) => {
+            try {
+                const sources = await desktopCapturer.getSources({
+                    types: ['screen'],
+                    thumbnailSize: { width: 0, height: 0 }
+                });
+                const source = sources && sources.length > 0 ? sources[0] : null;
+                if (!source) {
+                    console.error('❌ No display source found for main window capture');
+                    callback({});
+                    return;
+                }
+
+                callback({
+                    video: source,
+                    audio: 'loopback'
+                });
+            } catch (error) {
+                console.error('❌ mainWindow setDisplayMediaRequestHandler failed:', error);
+                callback({});
+            }
+        }, { useSystemPicker: false });
+        console.log('✅ Main window display media handler configured (no picker)');
+    } catch (error) {
+        console.warn('⚠️ Could not configure main window display media handler:', error.message);
+    }
     
     // Load main setup page - go directly to app (not landing page)
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
@@ -1151,7 +1187,7 @@ function createOverlayWindow() {
     // Handle microphone permissions for overlay
     overlay.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
         console.log('Overlay permission requested:', permission);
-        if (permission === 'microphone' || permission === 'media' || permission === 'camera') {
+        if (permission === 'microphone' || permission === 'media' || permission === 'camera' || permission === 'display-capture') {
             console.log('Granting overlay permission for:', permission);
             callback(true); // Grant microphone/media permission
         } else {
@@ -1159,6 +1195,36 @@ function createOverlayWindow() {
             callback(false);
         }
     });
+
+    // Auto-approve display media requests for overlay without showing picker.
+    // This enables getDisplayMedia({ audio: true }) to capture system loopback audio directly.
+    try {
+        overlay.webContents.session.setDisplayMediaRequestHandler(async (request, callback) => {
+            try {
+                const sources = await desktopCapturer.getSources({
+                    types: ['screen'],
+                    thumbnailSize: { width: 0, height: 0 }
+                });
+                const source = sources && sources.length > 0 ? sources[0] : null;
+                if (!source) {
+                    console.error('❌ No display source found for overlay capture');
+                    callback({});
+                    return;
+                }
+
+                callback({
+                    video: source,
+                    audio: 'loopback'
+                });
+            } catch (error) {
+                console.error('❌ setDisplayMediaRequestHandler failed:', error);
+                callback({});
+            }
+        }, { useSystemPicker: false });
+        console.log('✅ Overlay display media handler configured (no picker)');
+    } catch (error) {
+        console.warn('⚠️ Could not configure overlay display media handler:', error.message);
+    }
     
     // Load overlay page
     const FRONTEND_URL = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
@@ -1612,16 +1678,42 @@ app.whenReady().then(() => {
         }
     });
 
+    const dispatchShortcutToVisibleWindows = (channel, label) => {
+        const mainReady = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+        const overlayReady = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible();
+        const focused = BrowserWindow.getFocusedWindow();
+
+        // Prefer the currently focused app window to avoid double-triggering.
+        if (focused && mainReady && focused === mainWindow) {
+            mainWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to main window (focused)`);
+            return;
+        }
+        if (focused && overlayReady && focused === overlayWindow) {
+            overlayWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to overlay window (focused)`);
+            return;
+        }
+
+        // Fallbacks when no app window is focused (or focus is elsewhere).
+        if (overlayReady) {
+            overlayWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to overlay window`);
+            return;
+        }
+        if (mainReady) {
+            mainWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to main window`);
+            return;
+        }
+
+        console.log(`⚠️ ${label} skipped: no visible window`);
+    };
+
     // Register Ctrl+\ to toggle Start Listen / Stop & Get Answer
     globalShortcut.register('CommandOrControl+\\', () => {
         console.log('🎤 Ctrl+\\ pressed - Toggle Listen/Answer');
-        
-        if (overlayWindow && overlayWindow.isVisible()) {
-            overlayWindow.webContents.send('toggle-listen-answer');
-            console.log('✅ Toggle Listen/Answer sent to overlay');
-        } else {
-            console.log('⚠️ Overlay not visible');
-        }
+        dispatchShortcutToVisibleWindows('toggle-listen-answer', 'Toggle Listen/Answer');
     });
     
     console.log('✅ Ctrl+\\ shortcut registered:', globalShortcut.isRegistered('CommandOrControl+\\'));
@@ -1640,16 +1732,10 @@ app.whenReady().then(() => {
     
     console.log('✅ Ctrl+] shortcut registered:', globalShortcut.isRegistered('CommandOrControl+]'));
     
-    // Register Ctrl+Enter for Direct Answer in Overlay
+    // Register Ctrl+Enter for Direct Answer
     globalShortcut.register('CommandOrControl+Return', () => {
         console.log('⚡ Ctrl+Enter pressed - Direct Answer');
-        
-        if (overlayWindow && overlayWindow.isVisible()) {
-            overlayWindow.webContents.send('trigger-direct-answer');
-            console.log('✅ Direct Answer triggered');
-        } else {
-            console.log('⚠️ Overlay not visible');
-        }
+        dispatchShortcutToVisibleWindows('trigger-direct-answer', 'Direct Answer');
     });
     
     console.log('✅ Ctrl+Enter shortcut registered:', globalShortcut.isRegistered('CommandOrControl+Return'));

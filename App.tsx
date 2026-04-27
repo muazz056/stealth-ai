@@ -757,11 +757,13 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [qaPairs.length]);
 
-  // Global Ctrl+Enter shortcut for Get Answer
+// Global Ctrl+Enter shortcut for Get Answer (Vite app only - Electron uses IPC)
   useEffect(() => {
+    if (isElectronRef.current) return;
+
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Only trigger if Ctrl+Enter is pressed
-      if (e.ctrlKey && e.key === 'Enter') {
+      const hasPrimaryMod = e.ctrlKey || e.metaKey;
+      if (hasPrimaryMod && e.key === 'Enter') {
         e.preventDefault();
         
         if (isListening) {
@@ -795,22 +797,24 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       }
     };
 
-    // Add global event listener
+// Add global event listener
     window.addEventListener('keydown', handleGlobalKeyDown);
-    
+
     // Cleanup
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [manualTextInput, transcribedText, isListening, isGenerating]);
+}, [manualTextInput, transcribedText, isListening, isGenerating]);
 
-  // Global Ctrl+Backspace (Clear) and ESC shortcuts
+// Global Ctrl+\ (Start Listen) and Ctrl+Backspace (Clear) shortcuts (Vite app only)
   useEffect(() => {
-    console.log('🎯 Setting up keyboard shortcuts in App.tsx');
-    console.log('🔍 startListenRef.current:', startListenRef.current);
-    console.log('🔍 stopListenRef.current:', stopListenRef.current);
+    if (isElectronRef. current) return;
     
+    console.log('🎯 Setting up keyboard shortcuts in App.tsx');
+    console.log('🔍 startListenRef..current:', startListenRef.current);
+
     const handleGlobalKeyPress = (e: KeyboardEvent) => {
+      const hasPrimaryMod = e.ctrlKey || e.metaKey;
       // Ctrl+\ - Start/Stop Listen (local shortcut)
       // Check multiple conditions for backslash (works across different keyboards)
       const isBackslash = e.code === 'Backslash' || 
@@ -818,7 +822,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
                           e.keyCode === 220 ||
                           e.which === 220;
       
-      if (e.ctrlKey && isBackslash) {
+      if (hasPrimaryMod && isBackslash) {
         e.preventDefault();
         e.stopPropagation();
         
@@ -847,7 +851,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       }
       
       // Ctrl+Backspace - Clear question field
-      if (e.ctrlKey && e.key === 'Backspace') {
+      if (hasPrimaryMod && e.key === 'Backspace') {
         e.preventDefault();
         console.log('🧹 Ctrl+Backspace - Clearing');
         setManualTextInput('');
@@ -891,7 +895,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     // Add listener with capture phase to catch events early
     window.addEventListener('keydown', handleGlobalKeyPress, true);
     console.log('✅ Keyboard listener attached in App.tsx');
-    
+
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyPress, true);
       console.log('🗑️ Keyboard listener removed in App.tsx');
@@ -1106,8 +1110,23 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const deepgramWsRef = useRef<WebSocket | null>(null);
   const deepgramAudioRef = useRef<any>(null); // MediaStream for Deepgram browser
+  const displayCaptureStreamRef = useRef<MediaStream | null>(null);
+  const micCaptureStreamRef = useRef<MediaStream | null>(null);
+  const deepgramMixAudioContextRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const questionInputRef = useRef<HTMLTextAreaElement>(null);
+  const appLog = (...parts: any[]) => {
+    const message = parts
+      .map((p) => (typeof p === 'string' ? p : (() => { try { return JSON.stringify(p); } catch { return String(p); } })()))
+      .join(' ');
+    try {
+      if (typeof window !== 'undefined' && (window as any).require) {
+        const { ipcRenderer } = (window as any).require('electron');
+        ipcRenderer.send('overlay-log', `[MAIN-APP] ${message}`);
+      }
+    } catch (e) {}
+    console.log('[MAIN-APP]', ...parts);
+  };
   
   // Refs for current state values (to avoid stale closures)
   const apiKeysRef = useRef(apiKeys);
@@ -1261,11 +1280,44 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
       ipcRenderer.on('chat-history-updated', handleChatHistoryUpdate);
 
+      // Global shortcuts routed from main process (same channels as overlay)
+      const handleToggleListenAnswer = () => {
+        console.log('🎤 [App] Shortcut: toggle-listen-answer');
+        if (isListeningRef.current) {
+          if (stopListenRef.current) stopListenRef.current();
+        } else {
+          if (startListenRef.current) startListenRef.current();
+        }
+      };
+
+      const handleTriggerDirectAnswer = () => {
+        console.log('⚡ [App] Shortcut: trigger-direct-answer');
+        if (isListeningRef.current) {
+          handleStopListen();
+          setTimeout(() => {
+            const questionText = (manualTextInputRef.current + ' ' + transcribedTextRef.current).trim();
+            if (questionText && !isGeneratingRef.current) {
+              handleGetAnswer();
+            }
+          }, 500);
+          return;
+        }
+        const hasText = manualTextInputRef.current.trim().length > 0;
+        if (hasText && !isGeneratingRef.current) {
+          handleGetAnswer();
+        }
+      };
+
+      ipcRenderer.on('toggle-listen-answer', handleToggleListenAnswer);
+      ipcRenderer.on('trigger-direct-answer', handleTriggerDirectAnswer);
+
       // Cleanup
       return () => {
         ipcRenderer.removeListener('python-speech', handlePythonSpeech);
         ipcRenderer.removeListener('deepgram-sox-error', handleDeepgramError);
         ipcRenderer.removeListener('chat-history-updated', handleChatHistoryUpdate);
+        ipcRenderer.removeListener('toggle-listen-answer', handleToggleListenAnswer);
+        ipcRenderer.removeListener('trigger-direct-answer', handleTriggerDirectAnswer);
       };
 
     } else {
@@ -1360,12 +1412,119 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     setAiResponse('');
     wantToListenRef.current = true;
     
-if (isElectronRef.current) {
-      // Electron: Use Python Bridge
+if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
+      try {
+        appLog('Start listen: Electron deepgram mixed mode');
+        // 1) Capture system audio in Electron (no picker; handled in main session handler)
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          } as MediaTrackConstraints,
+        });
+        displayCaptureStreamRef.current = displayStream;
+
+        const systemAudioTracks = displayStream.getAudioTracks();
+        if (!systemAudioTracks || systemAudioTracks.length === 0) {
+          throw new Error('System audio track not available from getDisplayMedia');
+        }
+        appLog('System tracks:', systemAudioTracks.map((t: any) => t.label).join(' | '));
+        const systemAudioOnlyStream = new MediaStream(systemAudioTracks);
+
+        // 2) Capture microphone audio
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        micCaptureStreamRef.current = micStream;
+        appLog('Mic tracks:', micStream.getAudioTracks().map((t: any) => t.label).join(' | '));
+
+        // 3) Mix system + mic into a single stream
+        const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AC) {
+          throw new Error('AudioContext is not available in this Electron renderer');
+        }
+        const mixCtx = new AC();
+        deepgramMixAudioContextRef.current = mixCtx;
+
+        const systemSource = mixCtx.createMediaStreamSource(systemAudioOnlyStream);
+        const micSource = mixCtx.createMediaStreamSource(micStream);
+        const systemGain = mixCtx.createGain();
+        const micGain = mixCtx.createGain();
+        const destination = mixCtx.createMediaStreamDestination();
+
+        systemGain.gain.value = 1.0;
+        micGain.gain.value = 1.15;
+
+        systemSource.connect(systemGain).connect(destination);
+        micSource.connect(micGain).connect(destination);
+
+        const mixedStream = destination.stream;
+        deepgramAudioRef.current = mixedStream;
+        const mediaRecorder = new MediaRecorder(mixedStream);
+        mediaRecorderRef.current = mediaRecorder;
+        
+        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
+        deepgramWsRef.current = ws;
+        
+        ws.onopen = () => {
+          appLog('Deepgram WS opened');
+          mediaRecorder.start(1000);
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              ws.send(event.data);
+            }
+          };
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'connected') {
+              // Ready
+            } else if (data.type === 'error') {
+              console.error('Deepgram error:', data.message);
+            } else if (data.channel) {
+              const transcript = data.channel?.alternatives?.[0]?.transcript;
+              if (transcript) {
+                if (data.is_final) {
+                  setCommittedText(prev => (prev + ' ' + transcript).trim());
+                  setInterimText('');
+                } else {
+                  setInterimText(transcript);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore
+          }
+        };
+        
+        ws.onclose = () => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        };
+        
+        setIsListening(true);
+        appLog('Electron Deepgram mixed capture started');
+      } catch (e) {
+        appLog('Failed to start Electron Deepgram mixed capture', String(e));
+        console.error('Failed to start Electron Deepgram mixed capture:', e);
+        setIsListening(false);
+      }
+    } else if (isElectronRef.current) {
+      // Electron fallback: Use Python Bridge
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
-      console.log('🎤 VOICE: Python Bridge (Deepgram via Python)');
-      
+      console.log('🎤 VOICE: Python Bridge (fallback)');
     } else if (voiceProvider === 'deepgram' && deepgramApiKey) {
       try {
         // Audio constraints optimized for capturing speaker audio (YouTube, meeting apps)
@@ -1468,7 +1627,57 @@ if (isElectronRef.current) {
   const handleStopListen = () => {
     wantToListenRef.current = false;
     
-    if (isElectronRef.current) {
+    if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current) {
+      const currentText = transcribedText.trim();
+      setIsListening(false);
+      
+      try {
+        if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {
+          deepgramWsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+        }
+        deepgramWsRef.current?.close();
+      } catch (e) {}
+      deepgramWsRef.current = null;
+      
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (e) {}
+      mediaRecorderRef.current = null;
+      
+      try {
+        if (deepgramAudioRef.current) {
+          deepgramAudioRef.current.getTracks().forEach((track: any) => track.stop());
+        }
+      } catch (e) {}
+      deepgramAudioRef.current = null;
+
+      try {
+        displayCaptureStreamRef.current?.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+      displayCaptureStreamRef.current = null;
+
+      try {
+        micCaptureStreamRef.current?.getTracks().forEach((track) => track.stop());
+      } catch (e) {}
+      micCaptureStreamRef.current = null;
+
+      try {
+        deepgramMixAudioContextRef.current?.close();
+      } catch (e) {}
+      deepgramMixAudioContextRef.current = null;
+      
+      if (currentText.length > 0) {
+        setManualTextInput(prev => (prev + ' ' + currentText).trim());
+      }
+      
+      setTranscribedText('');
+      setCommittedText('');
+      setInterimText('');
+      console.log('🎤 Stopped Deepgram speech recognition');
+      
+    } else if (isElectronRef.current) {
       // Electron: Stop Python Bridge
       ipcRendererRef.current?.send('python-stop-listen');
       
@@ -1491,18 +1700,21 @@ if (isElectronRef.current) {
       
       // Close the WebSocket gracefully
       try {
-        if (deepgramWsRef.current.readyState === WebSocket.OPEN) {
-          // Send close signal to Deepgram
-          deepgramWsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+        const ws = deepgramWsRef.current as unknown as WebSocket;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'CloseStream' }));
         }
-        deepgramWsRef.current.close();
+        if (ws) {
+          ws.close();
+        }
       } catch (e) {}
       deepgramWsRef.current = null;
       
       // Stop MediaRecorder
       try {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
+        const mr = mediaRecorderRef.current as unknown as MediaRecorder;
+        if (mr && mr.state !== 'inactive') {
+          mr.stop();
         }
       } catch (e) {}
       mediaRecorderRef.current = null;
@@ -3142,7 +3354,7 @@ Respond in ${langDisplay}.]`;
                   }}
                   placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
                   onKeyDown={(e) => {
-                    if (e.ctrlKey && e.key === 'Backspace') {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Backspace') {
                       e.preventDefault();
                       setManualTextInput('');
                       setTranscribedText('');
