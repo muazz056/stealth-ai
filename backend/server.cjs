@@ -81,45 +81,228 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
-// Database connection
-let db = null;
+// ==================== ROBUST MONGODB CONNECTION ====================
 
-async function connectDB() {
-  if (db) return db;
+let db = null;
+let client = null;
+let isConnecting = false;
+let connectionAttempts = 0;
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_DELAY_MS = 2000;
+
+// Connection state logging
+function logConnectionState(prefix = '') {
+  const stateNames = ['DISCONNECTED', 'CONNECTED', 'CONNECTING', 'DISCONNECTING'];
+  const clientState = client?.topology?.serverState 
+    ? stateNames[client.topology.serverState] || 'unknown'
+    : db ? 'CONNECTED' : 'DISCONNECTED';
+  console.log(`📡 [BACKEND] ${prefix} Connection state: ${clientState}, isConnecting: ${isConnecting}, attempts: ${connectionAttempts}`);
+}
+
+// Test if connection is alive
+async function isConnectionAlive() {
+  if (!client || !db) return false;
   try {
-    // Try with TLS options for better compatibility
-    const client = new MongoClient(MONGO_URI, {
-      tls: true,
-      tlsAllowInvalidCertificates: false,
-      tlsAllowInvalidHostnames: false,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-    });
-    await client.connect();
-    db = client.db(DB_NAME);
-    console.log('✅ Backend DB connected to MongoDB');
-    return db;
-  } catch (error) {
-    console.error('❌ Backend DB connection failed:', error);
-    // Try again without TLS options as fallback
-    try {
-      const client = new MongoClient(MONGO_URI, {
-        serverSelectionTimeoutMS: 15000,
-      });
-      await client.connect();
-      db = client.db(DB_NAME);
-      console.log('✅ Backend DB connected (fallback mode)');
-      return db;
-    } catch (fallbackError) {
-      console.error('❌ Fallback also failed:', fallbackError);
-      throw error;
-    }
+    await client.db(DB_NAME).command({ ping: 1 });
+    return true;
+  } catch (e) {
+    return false;
   }
 }
+
+// Exponential backoff delay
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Robust connect with retry logic
+async function connectWithRetry(attempt = 1) {
+  if (isConnecting) {
+    console.log('⏳ connectWithRetry: Already connecting, waiting...');
+    while (isConnecting) {
+      await delay(100);
+    }
+    return db;
+  }
+  
+  // If we have a valid connection, verify it's alive
+  if (db) {
+    try {
+      await client.db(DB_NAME).command({ ping: 1 });
+      console.log('♻️ connectWithRetry: Existing connection is alive, reusing');
+      return db;
+    } catch (e) {
+      console.log('🔌 connectWithRetry: Existing connection dead, reconnecting...');
+      db = null;
+      client = null;
+    }
+  }
+  
+  isConnecting = true;
+  console.log(`🔌 connectWithRetry: Attempt ${attempt}/${MAX_RETRY_ATTEMPTS}`);
+  
+  try {
+    // Detect if using mongodb+srv:// (SRV record)
+    const isSRV = MONGO_URI.includes('mongodb+srv://');
+    console.log('🔍 Connection type:', isSRV ? 'mongodb+srv (DNS SRV)' : 'standard mongodb');
+    
+    // Build connection options for robustness
+    const connectionOptions = {
+      // Timeout settings
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+      
+      // TLS settings (standard practice for MongoDB Atlas)
+      ...(MONGO_URI.includes('ssl=true') || MONGO_URI.includes('tls=true') || MONGO_URI.includes('.mongodb.net') ? {
+        tls: true,
+        tlsAllowInvalidCertificates: false,
+        tlsAllowInvalidHostnames: false,
+      } : {}),
+      
+      // Connection pool settings
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      
+      // Heartbeat settings
+      heartbeatFrequencyMS: 10000,
+      
+      // Retry settings
+      retryWrites: true,
+      retryReads: true,
+    };
+    
+    client = new MongoClient(MONGO_URI, connectionOptions);
+    
+    // Add connection event listeners for diagnostics
+    client.on('connectionClosed', (event) => {
+      console.log('📡 [BACKEND] Connection closed:', event.connectionId, event.reason);
+    });
+    
+    client.on('connectionError', (event) => {
+      console.error('❌ [BACKEND] Connection error:', event.connectionId, event.error?.message);
+    });
+    
+    client.on('serverHeartbeatSucceeded', (event) => {
+      console.log('📡 [BACKEND] Heartbeat succeeded:', event.connectionId);
+    });
+    
+    client.on('serverHeartbeatFailed', (event) => {
+      console.error('❌ [BACKEND] Heartbeat failed:', event.connectionId, event.error?.message);
+    });
+    
+    client.on('topologyDescriptionChanged', (event) => {
+      const prevType = event.previousDescription?.type;
+      const newType = event.newDescription?.type;
+      console.log('📡 [BACKEND] Topology changed:', prevType, '->', newType);
+    });
+    
+    console.log('🔌 Attempting MongoDB connection...');
+    logConnectionState('BEFORE_CONNECT');
+    
+    await client.connect();
+    
+    // Verify connection
+    await client.db(DB_NAME).command({ ping: 1 });
+    
+    db = client.db(DB_NAME);
+    connectionAttempts = 0;
+    isConnecting = false;
+    
+    console.log('✅ [BACKEND] MongoDB connected successfully!');
+    logConnectionState('AFTER_CONNECT');
+    
+    return db;
+    
+  } catch (error) {
+    isConnecting = false;
+    connectionAttempts++;
+    
+    console.error('❌ [BACKEND] Connection failed:', error.message);
+    console.error('❌ [BACKEND] Error stack:', error.stack);
+    
+    // Close failed client
+    if (client) {
+      try {
+        await client.close();
+      } catch (closeErr) {}
+      client = null;
+    }
+    db = null;
+    
+    // Retry with exponential backoff if under max attempts
+    if (attempt < MAX_RETRY_ATTEMPTS) {
+      const backoffDelay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+      console.log(`⏳ Retrying in ${backoffDelay}ms (attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS})...`);
+      await delay(backoffDelay);
+      return connectWithRetry(attempt + 1);
+    }
+    
+    throw new Error(`MongoDB connection failed after ${MAX_RETRY_ATTEMPTS} attempts: ${error.message}`);
+  }
+}
+
+// Main connectDB function
+async function connectDB() {
+  logConnectionState('connectDB_ENTRY');
+  
+  // If already connected and alive, return
+  if (db) {
+    try {
+      await client.db(DB_NAME).command({ ping: 1 });
+      console.log('♻️ Reusing existing DB connection (verified alive)');
+      return db;
+    } catch (e) {
+      console.log('🔌 Existing connection dead, reconnecting...');
+      db = null;
+    }
+  }
+  
+  return connectWithRetry();
+}
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🛑 [BACKEND] Shutting down gracefully...');
+  if (client) {
+    try {
+      await client.close();
+      console.log('✅ [BACKEND] MongoDB connection closed');
+    } catch (e) {}
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🛑 [BACKEND] Shutting down gracefully...');
+  if (client) {
+    try {
+      await client.close();
+      console.log('✅ [BACKEND] MongoDB connection closed');
+    } catch (e) {}
+  }
+  process.exit(0);
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Interview Stealth Assist API is running' });
+});
+
+// DB health check endpoint
+app.get('/api/db-health', async (req, res) => {
+  try {
+    if (!db || !client) {
+      return res.json({ status: 'disconnected', readyState: 0 });
+    }
+    const isAlive = await isConnectionAlive();
+    res.json({ 
+      status: isAlive ? 'connected' : 'error', 
+      readyState: client.topology?.serverState || 'unknown'
+    });
+  } catch (e) {
+    res.json({ status: 'error', error: e.message });
+  }
 });
 
 // Helper: Default shortcuts
@@ -264,8 +447,16 @@ OUTPUT:
 // Login
 app.post('/api/auth/login', async (req, res) => {
   try {
+    console.log('🔐 [LOGIN] Request received');
+    console.log('🔐 [LOGIN] DB state before connectDB:');
+    logConnectionState('LOGIN');
+    
     const database = await connectDB();
     const users = database.collection('users');
+    
+    console.log('🔐 [LOGIN] DB connected successfully');
+    console.log('🔐 [LOGIN] DB state after connectDB:');
+    logConnectionState('LOGIN');
     
     const { username, password } = req.body;
 
@@ -294,7 +485,10 @@ app.post('/api/auth/login', async (req, res) => {
       user: userWithoutPassword
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ [LOGIN] Full error:', error);
+    console.error('❌ [LOGIN] Error stack:', error.stack);
+    console.error('❌ [LOGIN] Error name:', error.name);
+    console.error('❌ [LOGIN] Error code:', error.code);
     res.status(500).json({
       success: false,
       message: 'Login failed: ' + error.message

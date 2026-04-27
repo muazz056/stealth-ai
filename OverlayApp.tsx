@@ -1585,6 +1585,8 @@ const OverlayApp: React.FC = () => {
                   echoCancellation: false,
                   noiseSuppression: false,
                   autoGainControl: false,
+                  // Key setting: suppress local playback prevents feedback with headphones
+                  suppressLocalAudioPlayback: true,
                 } as MediaTrackConstraints,
               });
               displayCaptureStreamRef.current = displayStream;
@@ -1598,17 +1600,21 @@ const OverlayApp: React.FC = () => {
             }
 
             // Also capture microphone and mix with system audio so both are transcribed.
+            // Use optimized mic settings that work WITH headphones connected
             const micStream = await navigator.mediaDevices.getUserMedia({
               audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
+                // Keep echoCancellation ON when using headphones to prevent feedback
+                // This is the key setting that allows headphones + system audio
+                echoCancellation: { ideal: true },
+                noiseSuppression: { ideal: true },
+                autoGainControl: { ideal: false },
+                channelCount: { ideal: 1 },
               },
             });
             micCaptureStreamRef.current = micStream;
             overlayLog('Mic capture success', micStream.getAudioTracks().map((t) => t.label).join(' | '));
 
-            const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+            const AC: any = window.AudioContext || (window as any).webkitAudioContext;
             if (!AC) {
               throw new Error('AudioContext unavailable for stream mixing');
             }
@@ -1619,8 +1625,8 @@ const OverlayApp: React.FC = () => {
             const systemGain = mixCtx.createGain();
             const micGain = mixCtx.createGain();
             const destination = mixCtx.createMediaStreamDestination();
-            systemGain.gain.value = 1.0;
-            micGain.gain.value = 1.15;
+            systemGain.gain.value = 0.8;
+            micGain.gain.value = 1.2;
             systemSource.connect(systemGain).connect(destination);
             micSource.connect(micGain).connect(destination);
             stream = destination.stream;

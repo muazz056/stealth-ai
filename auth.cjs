@@ -42,33 +42,256 @@ if (!MONGO_URI) {
   console.error('❌ FATAL: MONGODB_URI is not set! Check .env file');
 }
 
+// ==================== ROBUST MONGODB CONNECTION ====================
+
 let client = null;
 let db = null;
+let isConnecting = false;
+let connectionAttempts = 0;
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_DELAY_MS = 2000;
 
-async function connectDB() {
-  if (db) {
-    console.log('♻️ Reusing existing DB connection');
-    return db;
-  }
-  
-  console.log('🔌 Connecting to MongoDB...');
-  console.log('📡 MONGO_URI:', MONGO_URI ? MONGO_URI.substring(0, 30) + '...' : 'undefined');
-  
-  if (!MONGO_URI) {
-    throw new Error('MONGODB_URI is not defined in environment');
-  }
-  
+// Connection state logging
+function logConnectionState(prefix = '') {
+  const stateNames = ['DISCONNECTED', 'CONNECTED', 'CONNECTING', 'DISCONNECTING'];
+  const clientState = client?.topology?.serverState 
+    ? stateNames[client.topology.serverState] || 'unknown'
+    : db ? 'CONNECTED' : 'DISCONNECTED';
+  console.log(`📡 [${prefix}] Connection state: ${clientState}, isConnecting: ${isConnecting}, attempts: ${connectionAttempts}`);
+}
+
+// Test if connection is alive
+async function isConnectionAlive() {
+  if (!client || !db) return false;
   try {
-    client = new MongoClient(MONGO_URI);
-    await client.connect();
-    db = client.db(DB_NAME);
-    console.log('✅ Auth DB connected successfully');
-    return db;
-  } catch (error) {
-    console.error('❌ Auth DB connection failed:', error.message);
-    throw error;
+    await client.db(DB_NAME).command({ ping: 1 });
+    return true;
+  } catch (e) {
+    return false;
   }
 }
+
+// Exponential backoff delay
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Robust connect with retry logic
+async function connectWithRetry(attempt = 1) {
+  if (isConnecting) {
+    console.log('⏳ connectWithRetry: Already connecting, waiting...');
+    // Wait for existing connection to complete
+    while (isConnecting) {
+      await delay(100);
+    }
+    return db;
+  }
+  
+  // If we have a valid connection, reuse it
+  if (db) {
+    try {
+      await client.db(DB_NAME).command({ ping: 1 });
+      console.log('♻️ connectWithRetry: Existing connection is alive, reusing');
+      return db;
+    } catch (e) {
+      console.log('🔌 connectWithRetry: Existing connection dead, reconnecting...');
+      db = null;
+      client = null;
+    }
+  }
+  
+  isConnecting = true;
+  console.log(`🔌 connectWithRetry: Attempt ${attempt}/${MAX_RETRY_ATTEMPTS}`);
+  
+  try {
+    const uriToLog = MONGO_URI ? MONGO_URI.substring(0, 30) + '...' : 'undefined';
+    console.log('📡 MONGO_URI:', uriToLog);
+    
+    if (!MONGO_URI) {
+      throw new Error('MONGODB_URI is not defined in environment');
+    }
+    
+    // Detect if using mongodb+srv:// (SRV record)
+    const isSRV = MONGO_URI.includes('mongodb+srv://');
+    console.log('🔍 Connection type:', isSRV ? 'mongodb+srv (DNS SRV)' : 'standard mongodb');
+    
+    // Build connection options for robustness
+    const connectionOptions = {
+      // Timeout settings
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+      
+      // TLS settings (standard practice for MongoDB Atlas)
+      ...(MONGO_URI.includes('ssl=true') || MONGO_URI.includes('tls=true') || MONGO_URI.includes('.mongodb.net') ? {
+        tls: true,
+        tlsAllowInvalidCertificates: false,
+        tlsAllowInvalidHostnames: false,
+      } : {}),
+      
+      // Connection pool settings
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      
+      // Heartbeat settings
+      heartbeatFrequencyMS: 10000,
+      
+      // Retry settings
+      retryWrites: true,
+      retryReads: true,
+    };
+    
+    client = new MongoClient(MONGO_URI, connectionOptions);
+    
+    // Add connection event listeners for diagnostics
+    client.on('connectionPoolCreated', (event) => {
+      console.log('📡 [AUTH] Connection pool created');
+    });
+    
+    client.on('connectionPoolClosed', (event) => {
+      console.log('📡 [AUTH] Connection pool closed');
+    });
+    
+    client.on('connectionCreated', (event) => {
+      console.log('📡 [AUTH] Connection created:', event.connectionId);
+    });
+    
+    client.on('connectionClosed', (event) => {
+      console.log('📡 [AUTH] Connection closed:', event.connectionId, event.reason);
+    });
+    
+    client.on('connectionReady', (event) => {
+      console.log('📡 [AUTH] Connection ready:', event.connectionId);
+    });
+    
+    client.on('connectionError', (event) => {
+      console.error('❌ [AUTH] Connection error:', event.connectionId, event.error?.message);
+    });
+    
+    client.on('serverHeartbeatStarted', (event) => {
+      console.log('📡 [AUTH] Heartbeat started:', event.connectionId);
+    });
+    
+    client.on('serverHeartbeatSucceeded', (event) => {
+      console.log('📡 [AUTH] Heartbeat succeeded:', event.connectionId, 'latency:', event.reply?.ok ? 'OK' : 'FAIL');
+    });
+    
+    client.on('serverHeartbeatFailed', (event) => {
+      console.error('❌ [AUTH] Heartbeat failed:', event.connectionId, event.error?.message);
+    });
+    
+    client.on('serverOpening', (event) => {
+      console.log('📡 [AUTH] Server opening:', event.address);
+    });
+    
+    client.on('serverClosed', (event) => {
+      console.log('📡 [AUTH] Server closed:', event.address);
+    });
+    
+    client.on('topologyOpening', (event) => {
+      console.log('📡 [AUTH] Topology opening');
+    });
+    
+    client.on('topologyClosed', (event) => {
+      console.log('📡 [AUTH] Topology closed');
+    });
+    
+    client.on('topologyDescriptionChanged', (event) => {
+      const prevType = event.previousDescription?.type;
+      const newType = event.newDescription?.type;
+      console.log('📡 [AUTH] Topology changed:', prevType, '->', newType);
+    });
+    
+    console.log('🔌 Attempting MongoDB connection...');
+    logConnectionState('BEFORE_CONNECT');
+    
+    await client.connect();
+    
+    // Verify connection
+    await client.db(DB_NAME).command({ ping: 1 });
+    
+    db = client.db(DB_NAME);
+    connectionAttempts = 0;
+    isConnecting = false;
+    
+    console.log('✅ [AUTH] MongoDB connected successfully!');
+    logConnectionState('AFTER_CONNECT');
+    
+    return db;
+    
+  } catch (error) {
+    isConnecting = false;
+    connectionAttempts++;
+    
+    console.error('❌ [AUTH] Connection failed:', error.message);
+    console.error('❌ [AUTH] Error stack:', error.stack);
+    
+    // Close failed client
+    if (client) {
+      try {
+        await client.close();
+      } catch (closeErr) {}
+      client = null;
+    }
+    db = null;
+    
+    // Retry with exponential backoff if under max attempts
+    if (attempt < MAX_RETRY_ATTEMPTS) {
+      const backoffDelay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+      console.log(`⏳ Retrying in ${backoffDelay}ms (attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS})...`);
+      await delay(backoffDelay);
+      return connectWithRetry(attempt + 1);
+    }
+    
+    throw new Error(`MongoDB connection failed after ${MAX_RETRY_ATTEMPTS} attempts: ${error.message}`);
+  }
+}
+
+// Main connectDB function
+async function connectDB() {
+  logConnectionState('connectDB_ENTRY');
+  
+  // If already connected and alive, return
+  if (db) {
+    try {
+      await client.db(DB_NAME).command({ ping: 1 });
+      console.log('♻️ Reusing existing DB connection (verified alive)');
+      return db;
+    } catch (e) {
+      console.log('🔌 Existing connection dead, reconnecting...');
+      db = null;
+    }
+  }
+  
+  return connectWithRetry();
+}
+
+// Graceful shutdown handler
+async function gracefulShutdown() {
+  console.log('🛑 [AUTH] Graceful shutdown initiated');
+  logConnectionState('SHUTDOWN');
+  
+  if (client) {
+    try {
+      await client.close(true); // force = true
+      console.log('✅ [AUTH] MongoDB connection closed gracefully');
+    } catch (e) {
+      console.error('❌ [AUTH] Error during shutdown:', e.message);
+    }
+  }
+  db = null;
+  client = null;
+}
+
+// Handle process signals
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+process.on('exit', () => {
+  if (client) {
+    console.log('👋 [AUTH] Process exiting, closing connection');
+    client.close().catch(() => {});
+  }
+});
 
 async function registerUser(userData) {
   try {
@@ -165,11 +388,17 @@ QUESTION CLASSIFICATION:
 
 async function loginUser(username, password) {
   console.log('🔐 loginUser called with:', { username, password: password ? '***' : 'empty' });
+  console.log('🔐 loginUser: DB state before connectDB:');
+  logConnectionState('loginUser');
   
   try {
     console.log('🔐 Login attempt for:', username);
     
     const database = await connectDB();
+    console.log('🔐 loginUser: DB connected successfully');
+    console.log('🔐 loginUser: DB state after connectDB:');
+    logConnectionState('loginUser');
+    
     const users = database.collection('users');
 
     console.log('🔍 Querying for user:', username);
@@ -225,7 +454,10 @@ async function loginUser(username, password) {
       user: userForFrontend
     };
   } catch (error) {
-    console.error('❌ EXCEPTION in loginUser:', error);
+    console.error('❌ [loginUser] EXCEPTION:', error);
+    console.error('❌ [loginUser] Stack:', error.stack);
+    console.error('❌ [loginUser] Error name:', error.name);
+    console.error('❌ [loginUser] Error code:', error.code);
     return {
       success: false,
       message: 'Login failed: ' + error.message
