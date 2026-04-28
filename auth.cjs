@@ -690,10 +690,11 @@ async function saveConversationHistory(userId, history) {
 
     // Insert new history
     if (history.length > 0) {
-      const messageDocs = history.map(msg => ({
+      const messageDocs = history.map((msg, index) => ({
         userId: new ObjectId(userIdString),
         ...msg,
-        savedAt: new Date()
+        savedAt: new Date(),
+        seq: index
       }));
 
       await messages.insertMany(messageDocs);
@@ -727,11 +728,11 @@ async function getConversationHistory(userId) {
 
     const history = await messages
       .find({ userId: new ObjectId(userIdString) })
-      .sort({ savedAt: 1 })
+      .sort({ seq: 1, savedAt: 1 })
       .toArray();
 
     // Remove MongoDB-specific fields
-    const cleanHistory = history.map(({ _id, userId, savedAt, ...msg }) => msg);
+    const cleanHistory = history.map(({ _id, userId, savedAt, seq, ...msg }) => msg);
 
     console.log('✅ Loaded', cleanHistory.length, 'messages');
 

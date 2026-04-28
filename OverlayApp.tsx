@@ -1222,20 +1222,31 @@ const OverlayApp: React.FC = () => {
   // Convert chat history to Q&A pairs whenever history changes
   useEffect(() => {
     const pairs: Array<{question: string, answer: string}> = [];
-    
-    for (let i = 0; i < chatHistory.length; i += 2) {
-      const userMsg = chatHistory[i];
-      const aiMsg = chatHistory[i + 1];
-      
-      if (userMsg && aiMsg) {
-        // Extract just the question from the full prompt
-        const fullText = userMsg.parts?.[0]?.text || userMsg.content || '';
-        const questionMatch = fullText.match(/Interview Question: "(.+?)"/);
-        const question = questionMatch ? questionMatch[1] : fullText;
-        
-        const answer = aiMsg.parts?.[0]?.text || aiMsg.content || '';
-        
-        pairs.push({ question, answer });
+
+    // Pair user messages with subsequent model messages by checking roles
+    for (let i = 0; i < chatHistory.length; i++) {
+      const msg = chatHistory[i];
+      if (msg.role === 'user' || (msg as any).role === 'user') {
+        const userMsg = msg;
+        // Look for the next model message
+        let aiMsg = null;
+        for (let j = i + 1; j < chatHistory.length; j++) {
+          if (chatHistory[j].role === 'model' || (chatHistory[j] as any).role === 'model') {
+            aiMsg = chatHistory[j];
+            break;
+          }
+        }
+
+        if (aiMsg) {
+          // Extract just the question from the full prompt
+          const fullText = userMsg.parts?.[0]?.text || (userMsg as any).content || '';
+          const questionMatch = fullText.match(/Interview Question: "(.+?)"/);
+          const question = questionMatch ? questionMatch[1] : fullText;
+
+          const answer = aiMsg.parts?.[0]?.text || (aiMsg as any).content || '';
+
+          pairs.push({ question, answer });
+        }
       }
     }
     
@@ -2073,8 +2084,10 @@ Respond in ${langDisplay}.]`
       
       // Match Electron: use contextMessages setting to bound history
       const contextPairs = overlayUserSettings?.contextMessages || 5;
-      const limitMessages = Math.max(2, Math.min(contextPairs * 2, 20));
-      const trimmedHistory = chatHistory.slice(-limitMessages);
+      const limitMessages = contextPairs * 2; // No hard cap - use full context window
+      const trimmedHistory = chatHistory.length > limitMessages
+        ? chatHistory.slice(-limitMessages)
+        : chatHistory;
       
       if (savedProvider === 'gemini') {
         // Gemini format

@@ -1039,10 +1039,11 @@ app.post('/api/messages/save-history', async (req, res) => {
 
     // Insert new history
     if (history.length > 0) {
-      const messageDocs = history.map(msg => ({
+      const messageDocs = history.map((msg, index) => ({
         userId: new ObjectId(userId),
         ...msg,
-        savedAt: new Date()
+        savedAt: new Date(),
+        seq: index
       }));
 
       await messages.insertMany(messageDocs);
@@ -1079,11 +1080,11 @@ app.get('/api/messages/history/:userId', async (req, res) => {
 
     const history = await messages
       .find({ userId: new ObjectId(userId) })
-      .sort({ savedAt: 1 })
+      .sort({ seq: 1, savedAt: 1 })
       .toArray();
 
     // Remove MongoDB-specific fields
-    const cleanHistory = history.map(({ _id, userId, savedAt, ...msg }) => msg);
+    const cleanHistory = history.map(({ _id, userId, savedAt, seq, ...msg }) => msg);
 
     res.json({
       success: true,
