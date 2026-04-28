@@ -7,6 +7,7 @@ import FeaturesPage from './pages/FeaturesPage';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import PricingPage from './pages/PricingPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 import App from './App';
 import AuthPage from './components/AuthPage';
 import { authClient } from './src/utils/authClient';
@@ -406,6 +407,12 @@ const AppRouter: React.FC = () => {
                   <Footer />
                 </>
               }
+            />
+
+            {/* Email Verification */}
+            <Route
+              path="/verify-email"
+              element={<VerifyEmailPage />}
             />
 
             {/* Protected route - Interview App */}

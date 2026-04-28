@@ -772,6 +772,22 @@ ipcMain.handle('auth-get-user', async (event, data) => {
     }
 });
 
+ipcMain.handle('auth-resend-verification', async (event, data) => {
+    console.log('🎯 IPC: auth-resend-verification received:', data);
+    if (!authModule) {
+        return { success: false, message: 'Auth module not available' };
+    }
+    try {
+        const email = typeof data === 'string' ? data : data.email;
+        const result = await authModule.resendVerificationEmail(email);
+        console.log('📤 IPC: Resend verification result:', result.success ? 'Success' : 'Failed');
+        return result;
+    } catch (error) {
+        console.error('❌ IPC error:', error);
+        return { success: false, message: error.message };
+    }
+});
+
 function createMainWindow() {
     mainWindow = new BrowserWindow({
         width: 800,

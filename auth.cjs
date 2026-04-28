@@ -1,7 +1,130 @@
-require('dotenv').config();
+// Load .env from same directory
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const { MongoClient, ObjectId } = require('mongodb');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+
+// Allowed email providers for registration
+const ALLOWED_EMAIL_PROVIDERS = [
+  'gmail.com',
+  'yahoo.com',
+  'outlook.com',
+  'hotmail.com',
+  'icloud.com',
+  'proton.me'
+];
+
+// Brevo API key from environment
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+
+// Validate email provider
+function isAllowedEmailProvider(email) {
+  const domain = email.toLowerCase().split('@')[1];
+  return ALLOWED_EMAIL_PROVIDERS.includes(domain);
+}
+
+// Generate verification token
+function generateVerificationToken() {
+  return require('crypto').randomBytes(32).toString('hex');
+}
+
+// Password validation
+function isPasswordStrong(password) {
+  const minLength = 8;
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasLowerCase = /[a-z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  
+  if (password.length < minLength) {
+    return { valid: false, message: 'Password must be at least 8 characters long' };
+  }
+  if (!hasUpperCase) {
+    return { valid: false, message: 'Password must contain at least one uppercase letter' };
+  }
+  if (!hasLowerCase) {
+    return { valid: false, message: 'Password must contain at least one lowercase letter' };
+  }
+  if (!hasNumber) {
+    return { valid: false, message: 'Password must contain at least one number' };
+  }
+  return { valid: true };
+}
+
+// Send verification email using Brevo API
+async function sendVerificationEmail(email, token, username) {
+  if (!BREVO_API_KEY) {
+    console.error('❌ BREVO_API_KEY not set in environment');
+    return { success: false, message: 'Email service not configured' };
+  }
+
+  const senderEmail = process.env.BREVO_SENDER_EMAIL;
+  if (!senderEmail) {
+    console.error('❌ BREVO_SENDER_EMAIL not set in environment');
+    return { success: false, message: 'Email sender not configured' };
+  }
+
+  const verificationLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
+
+  const emailData = JSON.stringify({
+    sender: { email: senderEmail, name: 'Stealth AI' },
+    to: [{ email: email }],
+    subject: 'Verify your Stealth AI account',
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">Welcome to Stealth AI, ${username}!</h2>
+        <p>Please verify your email address to activate your account.</p>
+        <p>
+          <a href="${verificationLink}" 
+             style="display: inline-block; padding: 12px 24px; background-color: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
+            Verify Email
+          </a>
+        </p>
+        <p>Or copy and paste this link into your browser:</p>
+        <p style="color: #666; word-break: break-all;">${verificationLink}</p>
+        <p style="color: #999; font-size: 12px;">This link will expire in 1 hour.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+        <p style="color: #999; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
+      </div>
+    `
+  });
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.brevo.com',
+      path: '/v3/smtp/email',
+      method: 'POST',
+      headers: {
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(emailData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        const result = JSON.parse(data);
+        if (res.statusCode === 200 || res.statusCode === 201) {
+          console.log('✅ Verification email sent to:', email);
+          resolve({ success: true, message: 'Verification email sent' });
+        } else {
+          console.error('❌ Brevo API error:', result);
+          resolve({ success: false, message: result.message || 'Failed to send email' });
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      console.error('❌ Brevo request error:', error);
+      resolve({ success: false, message: 'Failed to send email: ' + error.message });
+    });
+
+    req.write(emailData);
+    req.end();
+  });
+}
 
 // Try multiple sources for MONGODB_URI
 let MONGO_URI = process.env.MONGODB_URI;
@@ -298,6 +421,26 @@ async function registerUser(userData) {
     const database = await connectDB();
     const users = database.collection('users');
 
+    // Check if email provider is allowed
+    console.log('📧 [auth.cjs] Checking email provider for:', userData.email);
+    if (!isAllowedEmailProvider(userData.email)) {
+      console.log('❌ [auth.cjs] Email provider not allowed for:', userData.email);
+      return {
+        success: false,
+        message: 'This email provider is not allowed. Please use Gmail, Yahoo, Outlook, Hotmail, iCloud, or Proton.'
+      };
+    }
+    console.log('✅ [auth.cjs] Email provider allowed for:', userData.email);
+
+    // Validate password strength
+    const passwordCheck = isPasswordStrong(userData.password);
+    if (!passwordCheck.valid) {
+      return {
+        success: false,
+        message: passwordCheck.message
+      };
+    }
+
     // Check if username or email already exists
     const existingUser = await users.findOne({
       $or: [{ username: userData.username }, { email: userData.email }]
@@ -310,9 +453,13 @@ async function registerUser(userData) {
       };
     }
 
-// Default base prompt for new users
+    // Generate verification token
+    const verificationToken = generateVerificationToken();
+    const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Default base prompt for new users
     const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
- 
+  
 CONTEXT RULES:
 1. Document = single source of truth
 - Use mentioned skills, experience, projects, education
@@ -356,9 +503,12 @@ QUESTION CLASSIFICATION:
 - If question is COMPLETELY NEW (different topic): Answer independently
 - Let AI determine relationship based on topic similarity`;
 
-    // Create new user with default settings
+    // Create new user with default settings (unverified)
     const newUser = {
       ...userData,
+      verified: false,
+      emailVerificationToken: verificationToken,
+      emailVerificationExpiry: tokenExpiry,
       createdAt: new Date(),
       apiKeys: {},
       selectedProvider: '', // No default provider - user must choose
@@ -372,16 +522,135 @@ QUESTION CLASSIFICATION:
     };
 
     const result = await users.insertOne(newUser);
+    const userId = result.insertedId.toString();
+
+    // Send verification email
+    const emailResult = await sendVerificationEmail(userData.email, verificationToken, userData.username);
+
+    if (!emailResult.success) {
+      console.warn('⚠️ Failed to send verification email:', emailResult.message);
+      // Still return success but warn user
+      return {
+        success: true,
+        message: 'User registered successfully, but verification email could not be sent. Please contact support.',
+        userId: userId,
+        emailSent: false
+      };
+    }
+
     return {
       success: true,
-      message: 'User registered successfully',
-      userId: result.insertedId.toString()
+      message: 'User registered successfully. Please check your email to verify your account.',
+      userId: userId,
+      emailSent: true
     };
   } catch (error) {
     console.error('Registration error:', error);
     return {
       success: false,
       message: 'Registration failed: ' + error.message
+    };
+  }
+}
+
+async function verifyEmail(token) {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    console.log('🔍 Verifying email with token:', token.substring(0, 10) + '...');
+
+    const user = await users.findOne({
+      emailVerificationToken: token,
+      emailVerificationExpiry: { $gt: new Date() }
+    });
+
+    if (!user) {
+      return {
+        success: false,
+        message: 'Invalid or expired verification token. Please request a new verification email.'
+      };
+    }
+
+    // Mark user as verified
+    await users.updateOne(
+      { _id: user._id },
+      {
+        $set: { verified: true },
+        $unset: { emailVerificationToken: '', emailVerificationExpiry: '' }
+      }
+    );
+
+    console.log('✅ Email verified for:', user.email);
+
+    return {
+      success: true,
+      message: 'Email verified successfully! You can now log in.',
+      email: user.email
+    };
+  } catch (error) {
+    console.error('❌ Email verification error:', error);
+    return {
+      success: false,
+      message: 'Verification failed: ' + error.message
+    };
+  }
+}
+
+async function resendVerificationEmail(email) {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    const user = await users.findOne({ email });
+
+    if (!user) {
+      return {
+        success: false,
+        message: 'No account found with this email address.'
+      };
+    }
+
+    if (user.verified) {
+      return {
+        success: false,
+        message: 'This email is already verified. Please log in.'
+      };
+    }
+
+    // Generate new token
+    const verificationToken = generateVerificationToken();
+    const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await users.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: tokenExpiry
+        }
+      }
+    );
+
+    // Send verification email
+    const emailResult = await sendVerificationEmail(email, verificationToken, user.username);
+
+    if (!emailResult.success) {
+      return {
+        success: false,
+        message: 'Failed to send verification email: ' + emailResult.message
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Verification email sent! Please check your inbox.'
+    };
+  } catch (error) {
+    console.error('❌ Resend verification error:', error);
+    return {
+      success: false,
+      message: 'Failed to resend verification: ' + error.message
     };
   }
 }
@@ -402,7 +671,11 @@ async function loginUser(username, password) {
     const users = database.collection('users');
 
     console.log('🔍 Querying for user:', username);
-    const user = await users.findOne({ username, password });
+    // Allow login with username OR email
+    const user = await users.findOne({
+      $or: [{ username: username }, { email: username }],
+      password: password
+    });
     console.log('👤 User result:', user ? 'found' : 'not found');
 
     if (!user) {
@@ -410,6 +683,15 @@ async function loginUser(username, password) {
       return {
         success: false,
         message: 'Invalid username or password'
+      };
+    }
+
+    // Block login if email not verified (admins bypass)
+    if (!user.verified && user.role !== 'admin') {
+      console.log('❌ User not verified:', user.email);
+      return {
+        success: false,
+        message: 'Please verify your email before logging in. Check your inbox for the verification link.'
       };
     }
 
@@ -780,6 +1062,8 @@ async function clearConversationHistory(userId) {
 module.exports = {
   registerUser,
   loginUser,
+  verifyEmail,
+  resendVerificationEmail,
   updateUserApiKey,
   updateUserSettings,
   updateUserShortcuts,

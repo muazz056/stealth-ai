@@ -1,15 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { authClient } from '../src/utils/authClient';
 
 interface AuthPageProps {
   onAuthSuccess: (user: any) => void;
 }
 
+// Password validation hook
+const usePasswordStrength = (password: string) => {
+  const [strength, setStrength] = useState(0);
+  const [rules, setRules] = useState({
+    length: false,
+    uppercase: false,
+    lowercase: false,
+    number: false,
+  });
+
+  useEffect(() => {
+    const hasLength = password.length >= 8;
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /\d/.test(password);
+
+    setRules({
+      length: hasLength,
+      uppercase: hasUppercase,
+      lowercase: hasLowercase,
+      number: hasNumber,
+    });
+
+    let score = 0;
+    if (hasLength) score++;
+    if (hasUppercase) score++;
+    if (hasLowercase) score++;
+    if (hasNumber) score++;
+    setStrength(score);
+  }, [password]);
+
+  return { strength, rules };
+};
+
 const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   // Detect if running in Electron
   const isElectron = typeof window !== 'undefined' && (window as any).require;
   
   const [isLogin, setIsLogin] = useState(true);
+  const [showResendForm, setShowResendForm] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     name: '',
@@ -17,10 +52,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     password: '',
     confirmPassword: ''
   });
+  const [resendEmail, setResendEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
+
+  const { strength, rules } = usePasswordStrength(formData.password);
+
+  const isPasswordValid = () => {
+    if (isLogin) return true;
+    return rules.length && rules.uppercase && rules.lowercase && rules.number;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +73,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
     if (!isLogin && formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+
+    // Frontend password validation (signup only)
+    if (!isLogin && !isPasswordValid()) {
+      setError('Please ensure your password meets all requirements');
       return;
     }
 
@@ -44,6 +95,15 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
           setError(result.message);
         }
       } else {
+        // Frontend email validation (double-check)
+        const allowedDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'proton.me'];
+        const domain = formData.email.toLowerCase().split('@')[1];
+        if (!allowedDomains.includes(domain)) {
+          setError('This email provider is not allowed. Please use Gmail, Yahoo, Outlook, Hotmail, iCloud, or Proton.');
+          setLoading(false);
+          return;
+        }
+
         // Register
         const result = await authClient.register({
           username: formData.username,
@@ -53,11 +113,20 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         });
 
         if (result.success) {
-          // Auto-login after successful registration
-          const loginResult = await authClient.login(formData.username, formData.password);
-          if (loginResult.success) {
-            onAuthSuccess(loginResult.user);
-          }
+          // Don't auto-login - user needs to verify email first
+          setError('');
+          // Clear any existing session
+          localStorage.removeItem('isa_current_user');
+          alert('Registration successful! Please check your email to verify your account before logging in.');
+          setIsLogin(true); // Switch to login form
+          // Reset form
+          setFormData({
+            username: '',
+            name: '',
+            email: '',
+            password: '',
+            confirmPassword: ''
+          });
         } else {
           setError(result.message);
         }
@@ -111,10 +180,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Username */}
+          {/* Username or Email */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-              Username
+              Username or Email
             </label>
             <input
               type="text"
@@ -122,7 +191,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               required
               className="w-full bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-600/50 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              placeholder="Enter your username"
+              placeholder="Enter username or email"
             />
           </div>
 
@@ -171,7 +240,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required
-                className="w-full bg-slate-800/50 backdrop-blur-sm border border-slate-600/50 rounded-xl px-4 py-3 pr-12 text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-500"
+                className="w-full bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-600/50 rounded-xl px-4 py-3 pr-12 text-black dark:text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 placeholder="Enter your password"
               />
               <button
@@ -191,6 +260,49 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                 )}
               </button>
             </div>
+
+            {/* Password Strength Bar (Signup only) */}
+            {!isLogin && (
+              <div className="mt-3 space-y-2">
+                {/* Strength Bar */}
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map((level) => (
+                    <div
+                      key={level}
+                      className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+                        strength >= level
+                          ? level <= 2
+                            ? 'bg-red-500'
+                            : level === 3
+                            ? 'bg-yellow-500'
+                            : 'bg-green-500'
+                          : 'bg-slate-200 dark:bg-slate-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Validation Rules */}
+                <div className="space-y-1">
+                  <div className={`flex items-center gap-2 text-xs ${rules.length ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                    <span className="text-sm">{rules.length ? '✓' : '○'}</span>
+                    <span>At least 8 characters</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${rules.uppercase ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                    <span className="text-sm">{rules.uppercase ? '✓' : '○'}</span>
+                    <span>At least 1 uppercase letter</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${rules.lowercase ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                    <span className="text-sm">{rules.lowercase ? '✓' : '○'}</span>
+                    <span>At least 1 lowercase letter</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${rules.number ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                    <span className="text-sm">{rules.number ? '✓' : '○'}</span>
+                    <span>At least 1 number</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Confirm Password (Signup only) */}
@@ -251,11 +363,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         </form>
 
         {/* Toggle Login/Signup */}
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-2">
           <button
             onClick={() => {
               setIsLogin(!isLogin);
               setError('');
+              setShowResendForm(false);
               setFormData({
                 username: '',
                 name: '',
@@ -271,7 +384,70 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               {isLogin ? 'Sign Up' : 'Sign In'}
             </span>
           </button>
+
+          {/* Resend Verification Link */}
+          {isLogin && (
+            <div>
+              <button
+                onClick={() => {
+                  setShowResendForm(!showResendForm);
+                  setError('');
+                  setResendMessage('');
+                }}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Didn't receive verification email?
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Resend Verification Form */}
+        {showResendForm && (
+          <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-800/50 rounded-xl border border-slate-300 dark:border-slate-700">
+            <h3 className="text-sm font-bold text-black dark:text-white mb-2">Resend Verification Email</h3>
+            <div className="space-y-3">
+              <input
+                type="email"
+                value={resendEmail}
+                onChange={(e) => setResendEmail(e.target.value)}
+                placeholder="Enter your email"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-black dark:text-white placeholder:text-slate-400"
+              />
+              <button
+                onClick={async () => {
+                  if (!resendEmail) {
+                    setResendMessage('Please enter your email');
+                    return;
+                  }
+                  setResendLoading(true);
+                  setResendMessage('');
+                  try {
+                    const result = await authClient.resendVerification(resendEmail);
+                    if (result.success) {
+                      setResendMessage('Verification email sent! Check your inbox.');
+                    } else {
+                      setResendMessage(result.message);
+                    }
+                  } catch (error: any) {
+                    setResendMessage('Failed to resend: ' + error.message);
+                  } finally {
+                    setResendLoading(false);
+                  }
+                }}
+                disabled={resendLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-sm disabled:opacity-50"
+              >
+                {resendLoading ? 'Sending...' : 'Resend Verification Email'}
+              </button>
+              {resendMessage && (
+                <p className={`text-xs ${resendMessage.includes('sent') ? 'text-green-600' : 'text-red-600'}`}>
+                  {resendMessage}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
         </div>
       </div>
     </div>

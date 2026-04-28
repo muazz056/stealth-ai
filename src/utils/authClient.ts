@@ -79,6 +79,10 @@ export const authClient = {
 
   updateShortcuts: async (userId: string, shortcuts: any) => {
     return await authCall('auth-update-shortcuts', '/auth/shortcuts', { userId, shortcuts }, 'PUT');
+  },
+
+  resendVerification: async (email: string) => {
+    return await authCall('auth-resend-verification', '/auth/resend-verification', { email }, 'POST');
   }
 };
 
