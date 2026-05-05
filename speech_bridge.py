@@ -158,8 +158,6 @@ def listen_continuous():
             "timestamp": time.time()
         }
         print(json.dumps(fatal_error), flush=True)
-    finally:
-        microphone = None
 
 def handle_command(command):
     """
@@ -239,4 +237,3 @@ if __name__ == "__main__":
         }
         print(json.dumps(fatal), flush=True)
         sys.exit(1)
-
