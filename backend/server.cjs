@@ -70,7 +70,11 @@ async function sendVerificationEmail(email, token, username) {
     return { success: false, message: 'Email sender not configured' };
   }
 
-  const frontendUrl = process.env.VITE_FRONTEND_URL || 'http://localhost:5173';
+  // Use VERCEL_URL in production, fallback to VITE_FRONTEND_URL, then localhost
+  const frontendUrl = process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : (process.env.VITE_FRONTEND_URL || 'http://localhost:5173');
+  
   const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
   const emailData = JSON.stringify({

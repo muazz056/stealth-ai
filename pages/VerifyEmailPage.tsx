@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
-// Use frontend URL for API calls (NOT Vite dev server)
+// Always use the backend URL for API calls
 const getApiUrl = () => {
   // In Electron, use the backend directly
   if (typeof window !== 'undefined' && (window as any).require) {
     return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
   }
-  // In browser, use the current origin for API (same as where page is served)
-  return window.location.origin.replace(':5173', ':3001');
+  // In browser, use the same origin but with backend port
+  const origin = window.location.origin;
+  return origin.replace(':5173', ':3001');
 };
 
 const API_BASE_URL = getApiUrl();
