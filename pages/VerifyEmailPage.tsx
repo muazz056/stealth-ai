@@ -1,15 +1,25 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
-// Always use the backend URL for API calls
+// Get backend API URL (can be passed as search param or use Railway)
 const getApiUrl = () => {
-  // In Electron, use the backend directly
+  // First: check if backend URL is passed in search params
+  const params = new URLSearchParams(window.location.search);
+  const backendFromUrl = params.get('backend');
+  if (backendFromUrl) return decodeURIComponent(backendFromUrl);
+  
+  // Second: use VITE_BACKEND_URL (Railway env var)
+  const railwayUrl = import.meta.env.VITE_BACKEND_URL;
+  if (railwayUrl) return railwayUrl;
+  
+  // Third: in Electron, use VITE_API_BASE_URL
   if (typeof window !== 'undefined' && (window as any).require) {
     return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
   }
-  // In browser, use the same origin but with backend port
+  
+  // Fallback: derive from current origin (replace Vercel with Railway)
   const origin = window.location.origin;
-  return origin.replace(':5173', ':3001');
+  return origin.replace('stealth-ai-sand.vercel.app', 'your-app.up.railway.app');
 };
 
 const API_BASE_URL = getApiUrl();
