@@ -2233,37 +2233,110 @@ function setupDeepgramProxy(server) {
         return;
       }
       
-      const dgWs = new WebSocket(
-        'wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language + 
-        '&interim_results=true&vad_events=true',
-        { headers: { 'Authorization': 'Token ' + apiKey } }
-      );
+      const deepgramUrl =
+        'wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language +
+        '&interim_results=true&vad_events=true' +
+        '&smart_format=true&punctuate=true&endpointing=100&utterance_end_ms=1000';
+
+      console.log('🎧 Deepgram proxy opening connection to:', deepgramUrl);
+      console.log('🎧 Deepgram proxy sending Authorization header for API key length', apiKey.length);
+      
+      let dgWs;
+      let connectAttempts = 0;
+      const maxConnectAttempts = 3;
       let clientChunkCount = 0;
       let clientChunkBytes = 0;
-      let deepgramMessageCount = 0;
       
-      dgWs.on('open', () => {
-        console.log('🎧 Deepgram proxy connected. language=', language);
-        ws.send(JSON.stringify({ type: 'connected' }));
-      });
+      function createDeepgramConnection() {
+        connectAttempts++;
+        console.log(`🎧 Deepgram connection attempt ${connectAttempts}/${maxConnectAttempts}`);
+        dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
+        
+        let deepgramMessageCount = 0;
+        let firstDeepgramMessageLogged = false;
+        let userInitiatedClose = false;
+        
+        dgWs.on('error', (err) => {
+          console.error('Deepgram error:', err.message, 'stack:', err.stack);
+          if (err.message && err.message.includes('ENOTFOUND')) {
+            console.error('🎧 DNS resolution failed for api.deepgram.com - check network connection');
+          }
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: err.message }));
+          }
+          if (err.message && err.message.includes('ENOTFOUND') && connectAttempts < maxConnectAttempts) {
+            console.log(`🎧 Retrying Deepgram connection in 2 seconds... (attempt ${connectAttempts + 1})`);
+            setTimeout(createDeepgramConnection, 2000);
+          }
+        });
+        
+        dgWs.on('unexpected-response', (req, res) => {
+          const responseHeaders = {};
+          for (const [key, value] of Object.entries(res.headers || {})) {
+            responseHeaders[key] = value;
+          }
+          console.error('Deepgram unexpected-response:', {
+            statusCode: res.statusCode,
+            statusMessage: res.statusMessage,
+            headers: responseHeaders,
+            url: deepgramUrl
+          });
+        });
+        
+        dgWs.on('open', () => {
+          console.log('🎧 Deepgram proxy connected. language=', language);
+          userInitiatedClose = false;
+          ws.send(JSON.stringify({ type: 'connected' }));
+        });
+        
+        dgWs.on('message', (data) => {
+          deepgramMessageCount += 1;
+          const text = data instanceof Buffer ? data.toString() : data;
+          try {
+            const parsed = JSON.parse(text);
+            if (!firstDeepgramMessageLogged) {
+              firstDeepgramMessageLogged = true;
+              console.log('📨 First Deepgram message:', text.slice(0, 200));
+            }
+            if (parsed.type === 'Results') {
+              const transcript = parsed.channel?.alternatives?.[0]?.transcript;
+              const isFinal = parsed.is_final;
+              console.log(`📝 Deepgram #${deepgramMessageCount}: "${transcript || '(empty)'}" is_final=${isFinal}`);
+            } else {
+              if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
+                console.log(`📨 Deepgram message #${deepgramMessageCount}: type=${parsed.type}`);
+              }
+            }
+          } catch (e) {
+            if (deepgramMessageCount <= 3) {
+              console.log(`📨 Deepgram non-JSON message #${deepgramMessageCount}:`, text.slice(0, 100));
+            }
+          }
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(text);
+          }
+        });
+        
+        dgWs.on('close', (code, reason) => {
+          const reasonStr = reason?.toString?.() || '';
+          const closureType = userInitiatedClose ? 'USER_INITIATED' : (code === 1000 ? 'NORMAL_CLOSURE' : code === 1005 ? 'NO_STATUS_RECEIVED' : code === 1006 ? 'ABNORMAL_CLOSURE' : 'OTHER');
+          console.log(`🔌 Deepgram socket closed code=${code} reason='${reasonStr}' readyState=${dgWs.readyState} (${closureType})`);
+          ws.close();
+        });
+      }
       
-      dgWs.on('message', (data) => {
-        deepgramMessageCount += 1;
-        if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
-          console.log(`📨 Deepgram message #${deepgramMessageCount}`);
-        }
-        ws.send(data.toString());
-      });
-      dgWs.on('error', (err) => {
-        console.error('Deepgram error:', err.message);
-        ws.send(JSON.stringify({ type: 'error', message: err.message }));
-      });
-      dgWs.on('close', (code, reason) => {
-        console.log(`🔌 Deepgram socket closed code=${code} reason=${reason?.toString?.() || ''}`);
-        ws.close();
-      });
+      createDeepgramConnection();
       
       ws.on('message', (data) => {
+        // Check if client sent CloseStream to track user-initiated close
+        try {
+          const parsed = typeof data === 'string' ? JSON.parse(data) : null;
+          if (parsed && parsed.type === 'CloseStream') {
+            userInitiatedClose = true;
+            console.log('🛑 User initiated Deepgram close (CloseStream)');
+          }
+        } catch (e) {}
+        
         const len = Buffer.isBuffer(data)
           ? data.length
           : data instanceof ArrayBuffer
@@ -2335,7 +2408,7 @@ async function startServer() {
       setupDeepgramProxy(server);
     });
       console.log('');
-  } catch (error) {
+  } catch (error) {   
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }

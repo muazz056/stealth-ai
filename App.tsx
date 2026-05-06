@@ -1483,23 +1483,26 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
         deepgramWsRef.current = ws;
         
+        let deepgramReady = false;
+        
         ws.onopen = () => {
-          appLog('Deepgram WS opened');
-          mediaRecorder.start(1000);
-          
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-              ws.send(event.data);
-            }
-          };
+          appLog('Deepgram WS opened, waiting for connected message...');
         };
         
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log('🎧 App.tsx received:', data.type, data.channel?.alternatives?.[0]?.transcript || '', 'is_final:', data.is_final);
             
             if (data.type === 'connected') {
-              // Ready
+              appLog('Deepgram proxy connected, starting MediaRecorder...');
+              deepgramReady = true;
+              mediaRecorder.start(1000);
+              mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                  ws.send(event.data);
+                }
+              };
             } else if (data.type === 'error') {
               console.error('Deepgram error:', data.message);
             } else if (data.channel) {
@@ -1514,7 +1517,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
               }
             }
           } catch (e) {
-            // Ignore
+            console.error('Deepgram WS parse error:', e, 'raw:', event.data);
           }
         };
         
@@ -1531,7 +1534,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         console.error('Failed to start Electron Deepgram mixed capture:', e);
         setIsListening(false);
       }
-    } else if (isElectronRef.current) {
+    } else if (isElectronRef.current) {  
       // Electron fallback: Use Python Bridge
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
@@ -1635,12 +1638,19 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
   // Update ref
   startListenRef.current = handleStartListen;
 
-  const handleStopListen = () => {
-    wantToListenRef.current = false;
-    
-    if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current) {
-      const currentText = transcribedText.trim();
-      setIsListening(false);
+    const handleStopListen = () => {
+      wantToListenRef.current = false;
+      
+      if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current) {
+        const currentText = transcribedText.trim();
+        setIsListening(false);
+        
+        // Copy transcribed text to manual input so question bar keeps showing it
+        // COMMENTED OUT FOR TESTING
+        // if (currentText) {
+        //   setManualTextInput(currentText);
+        // }
+
       
       try {
         if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {

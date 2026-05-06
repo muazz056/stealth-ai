@@ -1426,30 +1426,35 @@ const OverlayApp: React.FC = () => {
       );
       deepgramWsRef.current = ws;
 
+      let deepgramReady = false;
+      let chunkCount = 0;
+      let byteCount = 0;
+      
       ws.onopen = () => {
-        overlayLog('Deepgram WS open');
-        let chunkCount = 0;
-        let byteCount = 0;
-        mediaRecorder.start(1000);
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            chunkCount += 1;
-            byteCount += event.data.size;
-            if (chunkCount <= 3 || chunkCount % 5 === 0) {
-              overlayLog('Audio chunk', { chunkCount, size: event.data.size, totalBytes: byteCount });
-            }
-            ws.send(event.data);
-          } else if (chunkCount <= 3) {
-            overlayLog('Empty/unsent chunk', { size: event.data.size, wsState: ws.readyState });
-          }
-        };
+        overlayLog('Deepgram WS open, waiting for connected message...');
       };
-
+      
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          overlayLog('OverlayApp received:', data.type, data.channel?.alternatives?.[0]?.transcript || '', 'is_final:', data.is_final);
+          
           if (data.type === 'connected') {
-            overlayLog('Proxy connected to Deepgram');
+            overlayLog('Proxy connected to Deepgram, starting MediaRecorder...');
+            deepgramReady = true;
+            mediaRecorder.start(1000);
+            mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                chunkCount += 1;
+                byteCount += event.data.size;
+                if (chunkCount <= 3 || chunkCount % 5 === 0) {
+                  overlayLog('Audio chunk', { chunkCount, size: event.data.size, totalBytes: byteCount });
+                }
+                ws.send(event.data);
+              } else if (chunkCount <= 3) {
+                overlayLog('Empty/unsent chunk', { size: event.data.size, wsState: ws.readyState });
+              }
+            };   
           }
           if (data.type === 'error') {
             overlayLog('Deepgram proxy error', data.message);
@@ -1698,6 +1703,12 @@ const OverlayApp: React.FC = () => {
       const currentText = transcribedText.trim();
       isStartedRef.current = false;
       setIsListening(false);
+
+      // Copy transcribed text to manual input so question bar keeps showing it
+      // COMMENTED OUT FOR TESTING
+      // if (currentText) {
+      //   setManualTextInput(currentText);
+      // }
 
       try {
         if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {
