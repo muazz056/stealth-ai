@@ -937,9 +937,9 @@ function createMainWindow() {
         }
         // No overlay, quit app
         console.log('No windows remaining - quitting app');
-        if (pythonBridge) {
-            pythonBridge.kill();
-            pythonBridge = null;
+        if (pythonProcess) {
+            pythonProcess.kill();
+            pythonProcess = null;
         }
         app.quit();
         mainWindow = null;
@@ -1459,10 +1459,10 @@ function createOverlayWindow() {
             return;
         }
         // No main window, quit app
-        console.log('No windows remaining - quitting app');
-        if (pythonBridge) {
-            pythonBridge.kill();
-            pythonBridge = null;
+        console.log('Main window closed');
+        if (pythonProcess) {
+            pythonProcess.kill();
+            pythonProcess = null;
         }
         if (floatingWidget) {
             floatingWidget.close();
