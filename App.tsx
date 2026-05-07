@@ -1565,13 +1565,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         deepgramWsRef.current = ws;
         
         ws.onopen = () => {
-          mediaRecorder.start(1000);
-          
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-              ws.send(event.data);
-            }
-          };
+          // Wait for 'connected' message before starting MediaRecorder
         };
         
         ws.onmessage = (event) => {
@@ -1579,7 +1573,12 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             const data = JSON.parse(event.data);
             
             if (data.type === 'connected') {
-              // Ready
+              mediaRecorder.start(1000);
+              mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                  ws.send(event.data);
+                }
+              };
             } else if (data.type === 'error') {
               console.error('Deepgram error:', data.message);
             } else if (data.channel) {
@@ -1641,7 +1640,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
     const handleStopListen = () => {
       wantToListenRef.current = false;
       
-      if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current) {
+      if (isElectronRef.current && (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current)) {
         const currentText = transcribedText.trim();
         setIsListening(false);
         
