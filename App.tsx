@@ -1484,9 +1484,21 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         deepgramWsRef.current = ws;
         
         let deepgramReady = false;
+        const pendingChunks: any[] = [];
+        
+        mediaRecorder.ondataavailable = (ev) => {
+          if (ev.data.size > 0) {
+            if (deepgramReady && ws.readyState === WebSocket.OPEN) {
+              ws.send(ev.data);
+            } else {
+              pendingChunks.push(ev.data);
+            }
+          }
+        };
         
         ws.onopen = () => {
-          appLog('Deepgram WS opened, waiting for connected message...');
+          appLog('Deepgram WS opened, starting recorder immediately...');
+          mediaRecorder.start(100);
         };
         
         ws.onmessage = (event) => {
@@ -1495,14 +1507,14 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             console.log('🎧 App.tsx received:', data.type, data.channel?.alternatives?.[0]?.transcript || '', 'is_final:', data.is_final);
             
             if (data.type === 'connected') {
-              appLog('Deepgram proxy connected, starting MediaRecorder...');
+              appLog(`Deepgram proxy connected, flushing ${pendingChunks.length} buffered chunks...`);
               deepgramReady = true;
-              mediaRecorder.start(1000);
-              mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                  ws.send(event.data);
+              for (const chunk of pendingChunks) {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(chunk);
                 }
-              };
+              }
+              pendingChunks.length = 0;
             } else if (data.type === 'error') {
               console.error('Deepgram error:', data.message);
             } else if (data.channel) {
@@ -1564,8 +1576,21 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
         deepgramWsRef.current = ws;
         
+        let deepgramReady$ = false;
+        const pendingChunks$: any[] = [];
+        
+        mediaRecorder.ondataavailable = (ev) => {
+          if (ev.data.size > 0) {
+            if (deepgramReady$ && ws.readyState === WebSocket.OPEN) {
+              ws.send(ev.data);
+            } else {
+              pendingChunks$.push(ev.data);
+            }
+          }
+        };
+        
         ws.onopen = () => {
-          // Wait for 'connected' message before starting MediaRecorder
+          mediaRecorder.start(100);
         };
         
         ws.onmessage = (event) => {
@@ -1573,12 +1598,13 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             const data = JSON.parse(event.data);
             
             if (data.type === 'connected') {
-              mediaRecorder.start(1000);
-              mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                  ws.send(event.data);
+              deepgramReady$ = true;
+              for (const chunk of pendingChunks$) {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(chunk);
                 }
-              };
+              }
+              pendingChunks$.length = 0;
             } else if (data.type === 'error') {
               console.error('Deepgram error:', data.message);
             } else if (data.channel) {

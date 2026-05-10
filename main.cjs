@@ -806,7 +806,7 @@ function createMainWindow() {
         closable: true,
         focusable: true,
         show: true,
-        title: 'Interview Assistant - Setup',
+        title: 'Stealth Assist',
         backgroundColor: '#1f2937',
         webPreferences: {
             nodeIntegration: true,
@@ -961,6 +961,7 @@ function createFloatingWidget() {
         frame: false,
         alwaysOnTop: true,
         skipTaskbar: true,
+        title: 'Stealth Assist',
         resizable: false,
         movable: true,
         minimizable: false,
@@ -1149,7 +1150,7 @@ function createOverlayWindow() {
         closable: true,
         focusable: true,
         show: false, // ✅ Start hidden, show when ready to prevent glitches
-        title: 'Interview Stealth Assist',
+        title: 'Stealth Assist',
         backgroundColor: '#00000000', // ✅ Fully transparent background
         hasShadow: true, // Keep shadow for visibility
         roundedCorners: true, // ✅ Smooth rounded edges (Windows 11+)
@@ -1499,6 +1500,9 @@ function createOverlayWindow() {
 }
 
 app.whenReady().then(() => {
+    // Set app identity for Windows taskbar
+    app.setAppUserModelId('com.stealthassist.app');
+    
     // Load auth module first
     loadAuthModule();
     

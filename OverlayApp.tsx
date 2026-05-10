@@ -1426,12 +1426,31 @@ const OverlayApp: React.FC = () => {
       );
       deepgramWsRef.current = ws;
 
-      let deepgramReady = false;
       let chunkCount = 0;
       let byteCount = 0;
+      let deepgramReady = false;
+      const pendingChunks: any[] = [];
+      
+      mediaRecorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) {
+          chunkCount += 1;
+          byteCount += ev.data.size;
+          if (chunkCount <= 3 || chunkCount % 5 === 0) {
+            overlayLog('Audio chunk', { chunkCount, size: ev.data.size, totalBytes: byteCount });
+          }
+          if (deepgramReady && ws.readyState === WebSocket.OPEN) {
+            ws.send(ev.data);
+          } else {
+            pendingChunks.push(ev.data);
+          }
+        } else if (chunkCount <= 3) {
+          overlayLog('Empty/unsent chunk', { size: ev.data.size, wsState: ws.readyState });
+        }
+      };
       
       ws.onopen = () => {
-        overlayLog('Deepgram WS open, waiting for connected message...');
+        overlayLog('Deepgram WS open, starting recorder immediately...');
+        mediaRecorder.start(100);
       };
       
       ws.onmessage = (event) => {
@@ -1440,21 +1459,14 @@ const OverlayApp: React.FC = () => {
           overlayLog('OverlayApp received:', data.type, data.channel?.alternatives?.[0]?.transcript || '', 'is_final:', data.is_final);
           
           if (data.type === 'connected') {
-            overlayLog('Proxy connected to Deepgram, starting MediaRecorder...');
+            overlayLog(`Proxy connected to Deepgram, flushing ${pendingChunks.length} buffered chunks...`);
             deepgramReady = true;
-            mediaRecorder.start(1000);
-            mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                chunkCount += 1;
-                byteCount += event.data.size;
-                if (chunkCount <= 3 || chunkCount % 5 === 0) {
-                  overlayLog('Audio chunk', { chunkCount, size: event.data.size, totalBytes: byteCount });
-                }
-                ws.send(event.data);
-              } else if (chunkCount <= 3) {
-                overlayLog('Empty/unsent chunk', { size: event.data.size, wsState: ws.readyState });
+            for (const chunk of pendingChunks) {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(chunk);
               }
-            };   
+            }
+            pendingChunks.length = 0;
           }
           if (data.type === 'error') {
             overlayLog('Deepgram proxy error', data.message);

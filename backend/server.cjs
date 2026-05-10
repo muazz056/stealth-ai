@@ -10,6 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const dns = require('dns');
+const { lookup: dnsLookup } = dns.promises;
 
 // Allowed email providers for registration
 const ALLOWED_EMAIL_PROVIDERS = [
@@ -2246,83 +2248,103 @@ function setupDeepgramProxy(server) {
       const maxConnectAttempts = 3;
       let clientChunkCount = 0;
       let clientChunkBytes = 0;
+      let userInitiatedClose = false;
       
       function createDeepgramConnection() {
         connectAttempts++;
         console.log(`🎧 Deepgram connection attempt ${connectAttempts}/${maxConnectAttempts}`);
-        dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
         
-        let deepgramMessageCount = 0;
-        let firstDeepgramMessageLogged = false;
-        let userInitiatedClose = false;
-        
-        dgWs.on('error', (err) => {
-          console.error('Deepgram error:', err.message, 'stack:', err.stack);
-          if (err.message && err.message.includes('ENOTFOUND')) {
-            console.error('🎧 DNS resolution failed for api.deepgram.com - check network connection');
-          }
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'error', message: err.message }));
-          }
-          if (err.message && err.message.includes('ENOTFOUND') && connectAttempts < maxConnectAttempts) {
-            console.log(`🎧 Retrying Deepgram connection in 2 seconds... (attempt ${connectAttempts + 1})`);
-            setTimeout(createDeepgramConnection, 2000);
-          }
-        });
-        
-        dgWs.on('unexpected-response', (req, res) => {
-          const responseHeaders = {};
-          for (const [key, value] of Object.entries(res.headers || {})) {
-            responseHeaders[key] = value;
-          }
-          console.error('Deepgram unexpected-response:', {
-            statusCode: res.statusCode,
-            statusMessage: res.statusMessage,
-            headers: responseHeaders,
-            url: deepgramUrl
-          });
-        });
-        
-        dgWs.on('open', () => {
-          console.log('🎧 Deepgram proxy connected. language=', language);
-          userInitiatedClose = false;
-          ws.send(JSON.stringify({ type: 'connected' }));
-        });
-        
-        dgWs.on('message', (data) => {
-          deepgramMessageCount += 1;
-          const text = data instanceof Buffer ? data.toString() : data;
-          try {
-            const parsed = JSON.parse(text);
-            if (!firstDeepgramMessageLogged) {
-              firstDeepgramMessageLogged = true;
-              console.log('📨 First Deepgram message:', text.slice(0, 200));
+        // Pre-resolve DNS to avoid ENOTFOUND during WebSocket creation
+        dnsLookup('api.deepgram.com').then(() => {
+          console.log('🎧 DNS resolved');
+          createDgWebSocket();
+        }).catch((dnsErr) => {
+          console.error('🎧 DNS lookup failed:', dnsErr.message);
+          if (connectAttempts < maxConnectAttempts) {
+            const delay = Math.min(100 * connectAttempts, 500);
+            console.log(`🎧 Retrying DNS in ${delay}ms...`);
+            setTimeout(createDeepgramConnection, delay);
+          } else {
+            console.error('🎧 All DNS retries exhausted, giving up');
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'error', message: 'DNS resolution failed for api.deepgram.com' }));
             }
-            if (parsed.type === 'Results') {
-              const transcript = parsed.channel?.alternatives?.[0]?.transcript;
-              const isFinal = parsed.is_final;
-              console.log(`📝 Deepgram #${deepgramMessageCount}: "${transcript || '(empty)'}" is_final=${isFinal}`);
-            } else {
-              if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
-                console.log(`📨 Deepgram message #${deepgramMessageCount}: type=${parsed.type}`);
+            ws.close(4001, 'Failed to resolve Deepgram DNS');
+          }
+        });
+        
+        function createDgWebSocket() {
+          dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
+          
+          let deepgramMessageCount = 0;
+          let firstDeepgramMessageLogged = false;
+          
+          dgWs.on('error', (err) => {
+            console.error('Deepgram error:', err.message, 'stack:', err.stack);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'error', message: err.message }));
+            }
+            if (connectAttempts < maxConnectAttempts) {
+              const delay = Math.min(500 * connectAttempts, 2000);
+              console.log(`🎧 Retrying Deepgram connection in ${delay}ms... (attempt ${connectAttempts + 1})`);
+              setTimeout(createDeepgramConnection, delay);
+            }
+          });
+          
+          dgWs.on('unexpected-response', (req, res) => {
+            const responseHeaders = {};
+            for (const [key, value] of Object.entries(res.headers || {})) {
+              responseHeaders[key] = value;
+            }
+            console.error('Deepgram unexpected-response:', {
+              statusCode: res.statusCode,
+              statusMessage: res.statusMessage,
+              headers: responseHeaders,
+              url: deepgramUrl
+            });
+          });
+          
+          dgWs.on('open', () => {
+            console.log('🎧 Deepgram proxy connected. language=', language);
+            userInitiatedClose = false;
+            ws.send(JSON.stringify({ type: 'connected' }));
+          });
+          
+          dgWs.on('message', (data) => {
+            deepgramMessageCount += 1;
+            const text = data instanceof Buffer ? data.toString() : data;
+            try {
+              const parsed = JSON.parse(text);
+              if (!firstDeepgramMessageLogged) {
+                firstDeepgramMessageLogged = true;
+                console.log('📨 First Deepgram message:', text.slice(0, 200));
+              }
+              if (parsed.type === 'Results') {
+                const transcript = parsed.channel?.alternatives?.[0]?.transcript;
+                const isFinal = parsed.is_final;
+                console.log(`📝 Deepgram #${deepgramMessageCount}: "${transcript || '(empty)'}" is_final=${isFinal}`);
+              } else {
+                if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
+                  console.log(`📨 Deepgram message #${deepgramMessageCount}: type=${parsed.type}`);
+                }
+              }
+            } catch (e) {
+              if (deepgramMessageCount <= 3) {
+                console.log(`📨 Deepgram non-JSON message #${deepgramMessageCount}:`, text.slice(0, 100));
               }
             }
-          } catch (e) {
-            if (deepgramMessageCount <= 3) {
-              console.log(`📨 Deepgram non-JSON message #${deepgramMessageCount}:`, text.slice(0, 100));
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(text);
             }
-          }
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(text);
-          }
-        });
-        
-        dgWs.on('close', (code, reason) => {
-          const reasonStr = reason?.toString?.() || '';
-          const closureType = userInitiatedClose ? 'USER_INITIATED' : (code === 1000 ? 'NORMAL_CLOSURE' : code === 1005 ? 'NO_STATUS_RECEIVED' : code === 1006 ? 'ABNORMAL_CLOSURE' : 'OTHER');
-          console.log(`🔌 Deepgram socket closed code=${code} reason='${reasonStr}' readyState=${dgWs.readyState} (${closureType})`);
-          ws.close();
-        });
+          });
+          
+          dgWs.on('close', (code, reason) => {
+            const reasonStr = reason?.toString?.() || '';
+            const closureType = userInitiatedClose ? 'USER_INITIATED' : (code === 1000 ? 'NORMAL_CLOSURE' : code === 1005 ? 'NO_STATUS_RECEIVED' : code === 1006 ? 'ABNORMAL_CLOSURE' : 'OTHER');
+            console.log(`🔌 Deepgram socket closed code=${code} reason='${reasonStr}' readyState=${dgWs.readyState} (${closureType})`);
+            ws.close();
+          });
+        }
       }
       
       createDeepgramConnection();
@@ -2349,15 +2371,15 @@ function setupDeepgramProxy(server) {
         }
         // Handle binary audio data properly
         if (data instanceof Buffer || data instanceof ArrayBuffer) {
-          if (dgWs.readyState === WebSocket.OPEN) dgWs.send(data);
-        } else if (dgWs.readyState === WebSocket.OPEN) {
+          if (dgWs && dgWs.readyState === WebSocket.OPEN) dgWs.send(data);
+        } else if (dgWs && dgWs.readyState === WebSocket.OPEN) {
           dgWs.send(data);
         }
       });
       
       // Send keep-alive ping every 5 seconds
       const pingInterval = setInterval(() => {
-        if (dgWs.readyState === WebSocket.OPEN) {
+        if (dgWs && dgWs.readyState === WebSocket.OPEN) {
           dgWs.ping();
         } else {
           clearInterval(pingInterval);
