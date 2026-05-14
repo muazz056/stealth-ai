@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { authClient } from '../src/utils/authClient';
+import StealthModal from './StealthModal';
 
 interface AuthPageProps {
   onAuthSuccess: (user: any) => void;
@@ -59,6 +60,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const { strength, rules } = usePasswordStrength(formData.password);
 
@@ -117,7 +119,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
           setError('');
           // Clear any existing session
           localStorage.removeItem('isa_current_user');
-          alert('Registration successful! Please check your email to verify your account before logging in.');
+          setShowSuccessModal(true);
           setIsLogin(true); // Switch to login form
           // Reset form
           setFormData({
@@ -180,10 +182,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Username or Email */}
+          {/* Username or Email (Login) / Username (Signup) */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-              Username or Email
+              {isLogin ? 'Username or Email' : 'Username'}
             </label>
             <input
               type="text"
@@ -191,7 +193,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               required
               className="w-full bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-600/50 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              placeholder="Enter username or email"
+              placeholder={isLogin ? "Enter username or email" : "Enter username"}
             />
           </div>
 
@@ -450,6 +452,21 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         )}
         </div>
       </div>
+
+      {/* Success Modal */}
+      <StealthModal
+        isOpen={showSuccessModal}
+        onClose={() => setShowSuccessModal(false)}
+        title="Verify Your Email"
+        icon="📧"
+        variant="info"
+        primaryAction={{
+          label: 'OK',
+          onClick: () => setShowSuccessModal(false)
+        }}
+      >
+        Please check your email to verify your account before logging in.
+      </StealthModal>
     </div>
   );
 };

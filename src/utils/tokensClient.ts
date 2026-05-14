@@ -25,7 +25,7 @@ export const tokensClient = {
         isAdmin: false,
         hasUnlimitedTokens: false,
         role: 'user',
-        plan: 'trial',
+        plan: 'Free',
         message: error.message || 'Failed to check tokens'
       };
     }

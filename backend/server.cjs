@@ -10,9 +10,6 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
-const dns = require('dns');
-const { lookup: dnsLookup } = dns.promises;
-
 // Allowed email providers for registration
 const ALLOWED_EMAIL_PROVIDERS = [
   'gmail.com',
@@ -461,12 +458,14 @@ function getDefaultShortcuts() {
   const primaryMod = isMac ? 'Cmd' : 'Ctrl';
   
   return {
-    startStopListen: { modifier: 'Ctrl', key: '\\' },
-    analyzeScreen: { modifier: 'Ctrl', key: ']' },
-    minimizeToggle: { modifier: 'Ctrl', key: '\'' },
-    focusQuestion: { modifier: 'Shift', key: '' },
-    clearQuestion: { modifier: 'Ctrl', key: 'Backspace' },
-    stopOrClear: { modifier: primaryMod, key: 'Backspace' }
+    toggleListen: { modifier: 'Control', key: '\\' },
+    analyzeScreen: { modifier: 'Control', key: ']' },
+    toggleOverlay: { modifier: 'Control', key: '\'' },
+    getAnswer: { modifier: 'Control', key: 'Enter' },
+    focusInput: { modifier: 'Alt', key: '' },
+    clearQuestion: { modifier: 'Control', key: 'Backspace' },
+    stopOrClear: { modifier: primaryMod === 'Cmd' ? 'Meta' : 'Control', key: 'Backspace' },
+    toggleBrowseAI: { modifier: 'Control', key: '[' }
   };
 }
 
@@ -513,9 +512,10 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     if (existingUser) {
+      const field = existingUser.username === username ? 'Username' : 'Email';
       return res.status(409).json({
         success: false,
-        message: 'Username or email already exists'
+        message: field + ' already exists'
       });
     }
 
@@ -580,7 +580,7 @@ OUTPUT:
       emailVerificationToken: verificationToken,
       emailVerificationExpiry: tokenExpiry,
       role: 'user', // Default role: regular user
-      plan: 'trial', // Trial plan for new users
+      plan: 'Free', // Free plan for new users
       tokens: 10, // ONE-TIME: 10 free tokens on signup
       createdAt: new Date(),
       apiKeys: {},
@@ -675,6 +675,21 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
+
+    // Migrate old shortcut names to new names
+    if (userWithoutPassword.shortcuts && typeof userWithoutPassword.shortcuts === 'object') {
+      const renameMap = {
+        startStopListen: 'toggleListen',
+        minimizeToggle: 'toggleOverlay',
+        focusQuestion: 'focusInput'
+      };
+      for (const [oldName, newName] of Object.entries(renameMap)) {
+        if (userWithoutPassword.shortcuts[oldName]) {
+          userWithoutPassword.shortcuts[newName] = userWithoutPassword.shortcuts[oldName];
+          delete userWithoutPassword.shortcuts[oldName];
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -1050,9 +1065,19 @@ app.put('/api/auth/shortcuts', async (req, res) => {
     console.log('⌨️ Updating user shortcuts for:', userId);
     console.log('🎹 Shortcuts:', shortcuts);
 
+    // Migrate old shortcuts data: move key to defaultKey and remove key
+    const migratedShortcuts = {};
+    for (const [action, config] of Object.entries(shortcuts)) {
+      migratedShortcuts[action] = { ...config };
+      if (config.key !== undefined) {
+        migratedShortcuts[action].defaultKey = config.key;
+        delete migratedShortcuts[action].key;
+      }
+    }
+
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      { $set: { shortcuts } }
+      { $set: { shortcuts: migratedShortcuts } }
     );
 
     console.log('✅ Shortcuts update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
@@ -1067,7 +1092,7 @@ app.put('/api/auth/shortcuts', async (req, res) => {
     res.json({
       success: true,
       message: 'Shortcuts updated successfully',
-      shortcuts: shortcuts
+      shortcuts: migratedShortcuts
     });
   } catch (error) {
     console.error('Update shortcuts error:', error);
@@ -1306,6 +1331,160 @@ app.put('/api/auth/deepgram-keyterms', async (req, res) => {
   }
 });
 
+// ==================== SUPER ADMIN ROUTES ====================
+
+// Helper: verify super admin
+async function verifySuperAdmin(database, userId) {
+  const users = database.collection('users');
+  const user = await users.findOne({ _id: new ObjectId(userId) });
+  if (!user || user.role !== 'super-admin') {
+    throw new Error('Unauthorized: super admin access required');
+  }
+  return user;
+}
+
+// Save AI model chain
+app.post('/api/auth/super-admin/ai-chain', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId, chain } = req.body;
+    if (!userId || !chain) {
+      return res.status(400).json({ success: false, message: 'userId and chain are required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const config = database.collection('app_config');
+    await config.updateOne(
+      { _id: 'ai_model_chain' },
+      { $set: { chain, updatedBy: userId, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    console.log(`🔐 Super admin ${userId} updated AI model chain (${chain.length} models)`);
+    res.json({ success: true, message: 'AI model chain saved', chain });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Save AI chain error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Get AI model chain
+app.get('/api/auth/super-admin/ai-chain', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const config = database.collection('app_config');
+    const doc = await config.findOne({ _id: 'ai_model_chain' });
+    res.json({ success: true, chain: doc?.chain || [] });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Get AI chain error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Save Deepgram key chain
+app.post('/api/auth/super-admin/deepgram-chain', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId, chain } = req.body;
+    if (!userId || !chain) {
+      return res.status(400).json({ success: false, message: 'userId and chain are required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const config = database.collection('app_config');
+    await config.updateOne(
+      { _id: 'deepgram_key_chain' },
+      { $set: { chain, updatedBy: userId, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    console.log(`🔐 Super admin ${userId} updated Deepgram key chain (${chain.length} keys)`);
+    res.json({ success: true, message: 'Deepgram key chain saved', chain });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Save Deepgram chain error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Get Deepgram key chain
+app.get('/api/auth/super-admin/deepgram-chain', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const config = database.collection('app_config');
+    const doc = await config.findOne({ _id: 'deepgram_key_chain' });
+    res.json({ success: true, chain: doc?.chain || [] });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Get Deepgram chain error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// List all users (super admin only)
+app.get('/api/auth/super-admin/users', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const users = database.collection('users');
+    const allUsers = await users.find({}, {
+      projection: { password: 0 }
+    }).sort({ createdAt: -1 }).toArray();
+    res.json({ success: true, users: allUsers });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('List users error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Get active Deepgram config from system chain (ANY authenticated user)
+app.get('/api/auth/deepgram-chain-public', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const config = database.collection('app_config');
+    const doc = await config.findOne({ _id: 'deepgram_key_chain' });
+    const chain = doc?.chain || [];
+    // Return the first active entry so users get the system-configured Deepgram key
+    const activeEntry = chain.find(e => e && e.active !== false && e.apiKey);
+    const deepgramKey = activeEntry?.apiKey || '';
+    const providerName = activeEntry?.provider || 'deepgram';
+    const dgConfig = {
+      apiKey: deepgramKey,
+      provider: providerName,
+      language: activeEntry?.language || 'multi',
+      keyterms: activeEntry?.keyterms || ''
+    };
+    console.log(`🌐 [DG-PUBLIC] Serving system Deepgram config: provider=${providerName}, hasKey=${!!deepgramKey}`);
+    res.json({ success: true, config: dgConfig, chain });
+  } catch (err) {
+    console.error('Get public Deepgram chain error:', err);
+    res.status(500).json({ success: false, message: err.message, config: null });
+  }
+});
+
 // ==================== MESSAGE/CONVERSATION ROUTES ====================
 
 // Save conversation message
@@ -1483,7 +1662,7 @@ app.get('/api/tokens/check/:userId', async (req, res) => {
       });
     }
 
-    const isAdmin = user.role === 'admin';
+    const isAdmin = user.role === 'admin' || user.role === 'super-admin';
     const hasUnlimitedTokens = isAdmin || user.tokens === -1;
     const canSendMessage = hasUnlimitedTokens || user.tokens > 0;
 
@@ -1531,7 +1710,7 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
     }
 
     // Don't consume tokens for admin or unlimited users
-    const isAdmin = user.role === 'admin';
+    const isAdmin = user.role === 'admin' || user.role === 'super-admin';
     const hasUnlimitedTokens = isAdmin || user.tokens === -1;
     
     if (hasUnlimitedTokens) {
@@ -1575,7 +1754,7 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
 
 // ==================== MESSAGE LIMIT & TRACKING (LEGACY - KEPT FOR COMPATIBILITY) ====================
 
-// Check if user can send message (trial limit)
+// Check if user can send message (free tier limit)
 app.get('/api/messages/check-limit/:userId', async (req, res) => {
   try {
     const database = await connectDB();
@@ -1715,13 +1894,38 @@ app.post('/api/summarize', async (req, res) => {
       hasApiKey: !!req.body.apiKey
     });
     
-    const { type, text, apiProvider, apiKey } = req.body;
+    let { type, text, apiProvider, apiKey } = req.body;
     
     if (!type || !text || !apiProvider) {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields: type, text, apiProvider'
       });
+    }
+
+    // Fall back to system AI chain if no user key provided
+    if (!apiKey) {
+      try {
+        const database = await connectDB();
+        const config = database.collection('app_config');
+        const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+        if (chainDoc?.chain) {
+          let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
+          if (!entry) {
+            entry = chainDoc.chain.find(e => e.active !== false);
+          }
+          if (entry) {
+            apiKey = entry.apiKey;
+            if (entry.provider !== apiProvider) {
+              console.log(`🔐 Switching provider ${apiProvider} → ${entry.provider} (summarize, from system chain)`);
+            }
+            apiProvider = entry.provider;
+            console.log(`🔐 Using system AI chain key for ${apiProvider} (summarize)`);
+          }
+        }
+      } catch (chainErr) {
+        console.error('Failed to read system AI chain:', chainErr.message);
+      }
     }
 
     // Build summary prompt based on type
@@ -1973,16 +2177,73 @@ app.post('/api/generate-stream', async (req, res) => {
   res.flushHeaders();
 
   try {
-    const { messages, apiProvider, apiKey, model } = req.body;
+    let { messages, apiKey: reqApiKey, model: reqModel } = req.body;
 
-    if (!messages || !apiProvider || !apiKey) {
+    if (!messages) {
       console.log('❌ Missing required fields');
-      res.write(`data: ${JSON.stringify({ error: 'Missing required fields: messages, apiProvider, apiKey' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: 'Missing required fields: messages' })}\n\n`);
       res.write('data: [DONE]\n\n');
       return res.end();
     }
 
-    console.log(`🤖 Streaming with provider: ${apiProvider}`);
+    let apiProvider = req.body.apiProvider;
+    let apiKey = reqApiKey;
+    let model = reqModel;
+
+    // Always check the system AI chain (super admin configured) for the API key
+    try {
+      const database = await connectDB();
+      const config = database.collection('app_config');
+      const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+      if (chainDoc?.chain) {
+        // Try to match the requested provider first
+        let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
+        if (!entry) {
+          // Fall back to first active entry in the chain
+          entry = chainDoc.chain.find(e => e.active !== false);
+        }
+        if (entry) {
+          if (!apiKey) apiKey = entry.apiKey;
+          if (!model) model = entry.model;
+          if (entry.provider !== apiProvider) {
+            console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
+          }
+          apiProvider = entry.provider;
+          console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
+        }
+      }
+    } catch (chainErr) {
+      console.error('Failed to read system AI chain:', chainErr.message);
+    }
+
+    if (!apiKey) {
+      console.log('❌ No API key available for provider:', apiProvider || 'unknown');
+      res.write(`data: ${JSON.stringify({ error: `No API key configured for ${apiProvider || 'unknown'}` })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+
+    console.log(`🤖 Streaming with provider: ${apiProvider} / ${model || 'default model'}`);
+
+    // Send provider metadata to frontend
+    res.write(`data: ${JSON.stringify({ provider: apiProvider, model: model || 'default' })}\n\n`);
+
+    // Convert messages to target provider format
+    let convertedMessages = messages;
+    if (apiProvider === 'gemini') {
+      // Convert from OpenAI format {role, content} to Gemini format {role, parts}
+      convertedMessages = messages.map((msg) => ({
+        role: msg.role === 'assistant' ? 'model' : msg.role,
+        parts: [{ text: msg.content || '' }]
+      }));
+    } else {
+      // Ensure OpenAI-compatible format (content as string)
+      convertedMessages = messages.map((msg) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.parts?.[0]?.text || msg.content || ''
+      }));
+    }
+    messages = convertedMessages;
 
     // --- GEMINI STREAMING ---
     if (apiProvider === 'gemini') {
@@ -2219,16 +2480,178 @@ app.post('/api/generate-stream', async (req, res) => {
   }
 });
 
+// ==================== SCREEN ANALYZE (vision) ====================
+app.post('/api/analyze-screen', async (req, res) => {
+  console.log('📸 Screen analyze request received');
+
+  try {
+    const { image, messages, prompt } = req.body;
+
+    if (!image) {
+      return res.status(400).json({ error: 'Missing image data' });
+    }
+
+    let apiProvider, apiKey, model;
+
+    // Read chain to determine provider
+    try {
+      const database = await connectDB();
+      const config = database.collection('app_config');
+      const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+      if (chainDoc?.chain) {
+        const entry = chainDoc.chain.find(e => e.active !== false);
+        if (entry) {
+          apiKey = entry.apiKey;
+          model = entry.model;
+          apiProvider = entry.provider;
+          console.log(`🔐 Screen analyze using system chain: ${apiProvider} / ${model || 'default model'}`);
+        }
+      }
+    } catch (chainErr) {
+      console.error('Failed to read system AI chain:', chainErr.message);
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ error: `No API key configured for ${apiProvider || 'unknown'}` });
+    }
+
+    // Build messages with image and call the appropriate provider
+    let text = '';
+
+    if (apiProvider === 'gemini') {
+      const contents = (messages || []).map((msg) => ({
+        role: msg.role === 'assistant' ? 'model' : msg.role,
+        parts: [{ text: msg.content || msg.parts?.[0]?.text || '' }]
+      }));
+      contents.push({
+        role: 'user',
+        parts: [
+          { text: prompt || 'Analyze this screenshot' },
+          { inline_data: { mime_type: 'image/png', data: image } }
+        ]
+      });
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents })
+        }
+      );
+
+      if (!response.ok) throw new Error(`Gemini API error: ${response.status} - ${await response.text()}`);
+      const data = await response.json();
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    } else if (apiProvider === 'openai') {
+      const msgs = (messages || []).map((msg) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.content || msg.parts?.[0]?.text || ''
+      }));
+      msgs.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt || 'Analyze this screenshot' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+        ]
+      });
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: model || 'gpt-4o-mini', messages: msgs, max_tokens: 4000 })
+      });
+
+      if (!response.ok) throw new Error(`OpenAI API error: ${response.status} - ${await response.text()}`);
+      const data = await response.json();
+      text = data.choices?.[0]?.message?.content || '';
+
+    } else if (apiProvider === 'claude') {
+      const msgs = (messages || []).map((msg) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.content || msg.parts?.[0]?.text || ''
+      }));
+      msgs.push({
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } },
+          { type: 'text', text: prompt || 'Analyze this screenshot' }
+        ]
+      });
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', messages: msgs, max_tokens: 4000 })
+      });
+
+      if (!response.ok) throw new Error(`Claude API error: ${response.status} - ${await response.text()}`);
+      const data = await response.json();
+      text = data.content?.[0]?.text || '';
+
+    } else if (apiProvider === 'groq') {
+      const msgs = (messages || []).map((msg) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.content || msg.parts?.[0]?.text || ''
+      }));
+      msgs.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt || 'Analyze this screenshot' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+        ]
+      });
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: model || 'meta-llama/llama-4-scout-17b-16e-instruct', messages: msgs, max_tokens: 4000 })
+      });
+
+      if (!response.ok) throw new Error(`Groq API error: ${response.status} - ${await response.text()}`);
+      const data = await response.json();
+      text = data.choices?.[0]?.message?.content || '';
+
+    } else {
+      return res.status(400).json({ error: `Unsupported provider: ${apiProvider}` });
+    }
+
+    res.json({ text });
+
+  } catch (error) {
+    console.error('❌ Screen analyze error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== DEEPGRAM WEBSOCKET PROXY ====================
 const { WebSocketServer, WebSocket } = require('ws');
 const deepgramWss = new WebSocketServer({ noServer: true });
 
 function setupDeepgramProxy(server) {
-  deepgramWss.on('connection', (ws, req) => {
+  deepgramWss.on('connection', async (ws, req) => {
     try {
       const url = new URL(req.url, 'http://localhost');
-      const apiKey = url.searchParams.get('apiKey');
+      let apiKey = url.searchParams.get('apiKey');
       const language = url.searchParams.get('language') || 'en-US';
+      
+      if (!apiKey) {
+        try {
+          const database = await connectDB();
+          const config = database.collection('app_config');
+          const chainDoc = await config.findOne({ _id: 'deepgram_key_chain' });
+          if (chainDoc?.chain) {
+            const entry = chainDoc.chain.find(e => e.active !== false);
+            if (entry) {
+              apiKey = entry.apiKey;
+              console.log('🎧 Using system Deepgram key chain');
+            }
+          }
+        } catch (chainErr) {
+          console.error('Failed to read Deepgram chain:', chainErr.message);
+        }
+      }
       
       if (!apiKey) {
         ws.close(4001, 'API key required');
@@ -2254,97 +2677,80 @@ function setupDeepgramProxy(server) {
         connectAttempts++;
         console.log(`🎧 Deepgram connection attempt ${connectAttempts}/${maxConnectAttempts}`);
         
-        // Pre-resolve DNS to avoid ENOTFOUND during WebSocket creation
-        dnsLookup('api.deepgram.com').then(() => {
-          console.log('🎧 DNS resolved');
-          createDgWebSocket();
-        }).catch((dnsErr) => {
-          console.error('🎧 DNS lookup failed:', dnsErr.message);
+        dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
+        
+        let deepgramMessageCount = 0;
+        let firstDeepgramMessageLogged = false;
+        
+        dgWs.on('error', (err) => {
+          if (userInitiatedClose) {
+            console.log('🛑 Deepgram error ignored (user initiated close)');
+            return;
+          }
+          console.error('Deepgram error:', err.message, 'stack:', err.stack);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: err.message }));
+          }
           if (connectAttempts < maxConnectAttempts) {
-            const delay = Math.min(100 * connectAttempts, 500);
-            console.log(`🎧 Retrying DNS in ${delay}ms...`);
+            const delay = Math.min(500 * connectAttempts, 2000);
+            console.log(`🎧 Retrying Deepgram connection in ${delay}ms... (attempt ${connectAttempts + 1})`);
             setTimeout(createDeepgramConnection, delay);
-          } else {
-            console.error('🎧 All DNS retries exhausted, giving up');
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'error', message: 'DNS resolution failed for api.deepgram.com' }));
-            }
-            ws.close(4001, 'Failed to resolve Deepgram DNS');
           }
         });
         
-        function createDgWebSocket() {
-          dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
-          
-          let deepgramMessageCount = 0;
-          let firstDeepgramMessageLogged = false;
-          
-          dgWs.on('error', (err) => {
-            console.error('Deepgram error:', err.message, 'stack:', err.stack);
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'error', message: err.message }));
-            }
-            if (connectAttempts < maxConnectAttempts) {
-              const delay = Math.min(500 * connectAttempts, 2000);
-              console.log(`🎧 Retrying Deepgram connection in ${delay}ms... (attempt ${connectAttempts + 1})`);
-              setTimeout(createDeepgramConnection, delay);
-            }
+        dgWs.on('unexpected-response', (req, res) => {
+          const responseHeaders = {};
+          for (const [key, value] of Object.entries(res.headers || {})) {
+            responseHeaders[key] = value;
+          }
+          console.error('Deepgram unexpected-response:', {
+            statusCode: res.statusCode,
+            statusMessage: res.statusMessage,
+            headers: responseHeaders,
+            url: deepgramUrl
           });
-          
-          dgWs.on('unexpected-response', (req, res) => {
-            const responseHeaders = {};
-            for (const [key, value] of Object.entries(res.headers || {})) {
-              responseHeaders[key] = value;
+        });
+        
+        dgWs.on('open', () => {
+          console.log('🎧 Deepgram proxy connected. language=', language);
+          userInitiatedClose = false;
+          ws.send(JSON.stringify({ type: 'connected' }));
+        });
+        
+        dgWs.on('message', (data) => {
+          deepgramMessageCount += 1;
+          const text = data instanceof Buffer ? data.toString() : data;
+          try {
+            const parsed = JSON.parse(text);
+            if (!firstDeepgramMessageLogged) {
+              firstDeepgramMessageLogged = true;
+              console.log('📨 First Deepgram message:', text.slice(0, 200));
             }
-            console.error('Deepgram unexpected-response:', {
-              statusCode: res.statusCode,
-              statusMessage: res.statusMessage,
-              headers: responseHeaders,
-              url: deepgramUrl
-            });
-          });
-          
-          dgWs.on('open', () => {
-            console.log('🎧 Deepgram proxy connected. language=', language);
-            userInitiatedClose = false;
-            ws.send(JSON.stringify({ type: 'connected' }));
-          });
-          
-          dgWs.on('message', (data) => {
-            deepgramMessageCount += 1;
-            const text = data instanceof Buffer ? data.toString() : data;
-            try {
-              const parsed = JSON.parse(text);
-              if (!firstDeepgramMessageLogged) {
-                firstDeepgramMessageLogged = true;
-                console.log('📨 First Deepgram message:', text.slice(0, 200));
-              }
-              if (parsed.type === 'Results') {
-                const transcript = parsed.channel?.alternatives?.[0]?.transcript;
-                const isFinal = parsed.is_final;
-                console.log(`📝 Deepgram #${deepgramMessageCount}: "${transcript || '(empty)'}" is_final=${isFinal}`);
-              } else {
-                if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
-                  console.log(`📨 Deepgram message #${deepgramMessageCount}: type=${parsed.type}`);
-                }
-              }
-            } catch (e) {
-              if (deepgramMessageCount <= 3) {
-                console.log(`📨 Deepgram non-JSON message #${deepgramMessageCount}:`, text.slice(0, 100));
+            if (parsed.type === 'Results') {
+              const transcript = parsed.channel?.alternatives?.[0]?.transcript;
+              const isFinal = parsed.is_final;
+              console.log(`📝 Deepgram #${deepgramMessageCount}: "${transcript || '(empty)'}" is_final=${isFinal}`);
+            } else {
+              if (deepgramMessageCount <= 3 || deepgramMessageCount % 10 === 0) {
+                console.log(`📨 Deepgram message #${deepgramMessageCount}: type=${parsed.type}`);
               }
             }
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(text);
+          } catch (e) {
+            if (deepgramMessageCount <= 3) {
+              console.log(`📨 Deepgram non-JSON message #${deepgramMessageCount}:`, text.slice(0, 100));
             }
-          });
-          
-          dgWs.on('close', (code, reason) => {
-            const reasonStr = reason?.toString?.() || '';
-            const closureType = userInitiatedClose ? 'USER_INITIATED' : (code === 1000 ? 'NORMAL_CLOSURE' : code === 1005 ? 'NO_STATUS_RECEIVED' : code === 1006 ? 'ABNORMAL_CLOSURE' : 'OTHER');
-            console.log(`🔌 Deepgram socket closed code=${code} reason='${reasonStr}' readyState=${dgWs.readyState} (${closureType})`);
-            ws.close();
-          });
-        }
+          }
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(text);
+          }
+        });
+        
+        dgWs.on('close', (code, reason) => {
+          const reasonStr = reason?.toString?.() || '';
+          const closureType = userInitiatedClose ? 'USER_INITIATED' : (code === 1000 ? 'NORMAL_CLOSURE' : code === 1005 ? 'NO_STATUS_RECEIVED' : code === 1006 ? 'ABNORMAL_CLOSURE' : 'OTHER');
+          console.log(`🔌 Deepgram socket closed code=${code} reason='${reasonStr}' readyState=${dgWs.readyState} (${closureType})`);
+          ws.close();
+        });
       }
       
       createDeepgramConnection();
@@ -2356,6 +2762,10 @@ function setupDeepgramProxy(server) {
           if (parsed && parsed.type === 'CloseStream') {
             userInitiatedClose = true;
             console.log('🛑 User initiated Deepgram close (CloseStream)');
+            if (dgWs && dgWs.readyState === WebSocket.OPEN) {
+              dgWs.close();
+            }
+            return;
           }
         } catch (e) {}
         
@@ -2385,7 +2795,10 @@ function setupDeepgramProxy(server) {
           clearInterval(pingInterval);
         }
       }, 5000);
-      ws.on('close', () => dgWs.close());
+      ws.on('close', () => {
+        userInitiatedClose = true;
+        dgWs.close();
+      });
       
     } catch (err) {
       console.error('📡 Proxy error:', err.message);

@@ -10,6 +10,7 @@ interface ResumeManagerProps {
 
 const ResumeManager: React.FC<ResumeManagerProps> = ({ onDataParsed, currentResume }) => {
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [parsedText, setParsedText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -61,11 +62,11 @@ const ResumeManager: React.FC<ResumeManagerProps> = ({ onDataParsed, currentResu
         // Show success notification
         console.log('✅ CV parsed successfully:', result.filename, `(${result.length} chars)`);
       } else {
-        alert(`Failed to parse CV: ${result.message}`);
+        setUploadError(`Failed to parse CV: ${result.message}`);
       }
     } catch (err: any) {
       console.error("Failed to parse CV:", err);
-      alert('Failed to parse CV. Please try again or ensure the backend is running.');
+      setUploadError('Failed to parse CV. Please try again or ensure the backend is running.');
     } finally {
       setIsUploading(false);
     }
@@ -138,6 +139,12 @@ const ResumeManager: React.FC<ResumeManagerProps> = ({ onDataParsed, currentResu
           <div className="flex items-center justify-center gap-2 p-3 bg-blue-100 dark:bg-blue-500/10 border border-blue-300 dark:border-blue-500/20 rounded-lg">
             <div className="w-4 h-4 border-2 border-blue-600 dark:border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             <span className="text-sm text-blue-700 dark:text-blue-400">Parsing CV...</span>
+          </div>
+        )}
+
+        {uploadError && (
+          <div className="p-3 bg-red-100 dark:bg-red-500/10 border border-red-300 dark:border-red-500/20 rounded-lg">
+            <p className="text-sm text-red-700 dark:text-red-400">{uploadError}</p>
           </div>
         )}
       </div>

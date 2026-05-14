@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import StealthModal from './components/StealthModal';
 
 const MainApp: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [microphoneTest, setMicrophoneTest] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [microphoneError, setMicrophoneError] = useState('');
   const [speechRecognitionSupported, setSpeechRecognitionSupported] = useState(false);
+  const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
   useEffect(() => {
     // Check for stored API key
@@ -48,18 +50,18 @@ const MainApp: React.FC = () => {
   const saveApiKey = () => {
     if (apiKey.trim()) {
       localStorage.setItem('gemini_api_key', apiKey.trim());
-      alert('API key saved successfully!');
+      setModalInfo({ title: 'Success', message: 'API key saved successfully!', variant: 'success', icon: '✅' });
     }
   };
 
   const launchStealthPip = () => {
     if (!apiKey.trim()) {
-      alert('Please set your Gemini API key first');
+      setModalInfo({ title: 'Missing API Key', message: 'Please set your Gemini API key first', variant: 'warning', icon: '🔑' });
       return;
     }
 
     if (microphoneTest !== 'success') {
-      alert('Please test microphone access first');
+      setModalInfo({ title: 'Microphone Required', message: 'Please test microphone access first', variant: 'warning', icon: '🎤' });
       return;
     }
 
@@ -179,6 +181,20 @@ const MainApp: React.FC = () => {
           </ol>
         </div>
       </div>
+
+      <StealthModal
+        isOpen={!!modalInfo}
+        onClose={() => setModalInfo(null)}
+        title={modalInfo?.title || ''}
+        icon={modalInfo?.icon}
+        variant={modalInfo?.variant || 'info'}
+        primaryAction={{
+          label: 'OK',
+          onClick: () => setModalInfo(null)
+        }}
+      >
+        {modalInfo?.message}
+      </StealthModal>
     </div>
   );
 };

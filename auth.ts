@@ -106,7 +106,7 @@ export async function registerUser(userData: {
       emailVerificationToken: verificationToken,
       emailVerificationExpiry: tokenExpiry,
       role: 'user',
-      plan: 'trial',
+      plan: 'Free',
       tokens: 10,
       createdAt: new Date(),
       apiKeys: {},

@@ -10,6 +10,10 @@ import 'highlight.js/styles/github-dark.css'; // Code highlighting theme
 import 'katex/dist/katex.min.css'; // Math rendering styles
 import { messagesClient } from './src/utils/messagesClient';
 import { tokensClient } from './src/utils/tokensClient';
+import { resolveDeepgramConfig, shouldUseDeepgram } from './src/utils/deepgramChainClient';
+import { getDefaultShortcuts, ShortcutConfig, ShortcutAction } from './src/utils/shortcutsManager';
+import StealthModal from './components/StealthModal';
+import SearchableLanguageSelect from './components/SearchableLanguageSelect';
 
 // Custom Code Component with Copy Button
 const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
@@ -199,16 +203,11 @@ const OverlayApp: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [modelsModalOpen, setModelsModalOpen] = useState(false);
   const [languageModalOpen, setLanguageModalOpen] = useState(false);
+  const [keywordsModalOpen, setKeywordsModalOpen] = useState(false);
   const [currentVoiceProvider, setCurrentVoiceProvider] = useState<'default' | 'deepgram'>('default');
   const [currentLanguage, setCurrentLanguage] = useState<string>('multi');
   const [currentKeyterms, setCurrentKeyterms] = useState<string>('');
-  const [overlayApiProvider, setOverlayApiProvider] = useState<'gemini' | 'openai' | 'claude' | 'groq'>('gemini');
-  const [overlayApiKey, setOverlayApiKey] = useState('');
-  const [overlaySaveSuccess, setOverlaySaveSuccess] = useState(false);
-  const [overlaySaveError, setOverlaySaveError] = useState<string | null>(null);
-  const [overlaySaving, setOverlaySaving] = useState(false);
   const [overlayUserSettings, setOverlayUserSettings] = useState<any>({});
   
   // Browser mode state
@@ -217,6 +216,9 @@ const OverlayApp: React.FC = () => {
   const [aiProviderForBrowser, setAiProviderForBrowser] = useState<'chatgpt' | 'aistudio' | 'claude' | 'gemini' | 'google'>('google');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showProviderModal, setShowProviderModal] = useState(false);
+  const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
   
   // Track which providers have received context (persists per user)
   const [providersSentContext, setProvidersSentContext] = useState<Set<string>>(() => {
@@ -302,12 +304,28 @@ const OverlayApp: React.FC = () => {
           const { ipcRenderer } = (window as any).require('electron');
           ipcRenderer.send('init-voice-provider', {
             voiceProvider,
-            apiKey: deepgramKey,
             language: dgLang,
             keyterms: dgKeyterms
           });
           
           console.log('✅ [Overlay] Voice provider init command sent on mount');
+          
+          // Also register global shortcuts (merge frontend defaults with DB overrides)
+          const defaults = getDefaultShortcuts();
+          const merged = { ...defaults };
+          if (user.shortcuts) {
+            console.log('🎹 [Overlay] Registering global shortcuts from database');
+            for (const [action, val] of Object.entries(user.shortcuts)) {
+              const userShortcut = val as any;
+              const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action === 'startStopListen' ? 'toggleListen' : action;
+              merged[mappedAction] = {
+                ...(defaults[mappedAction] || {}),
+                modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
+                defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
+              };
+            }
+          }
+          ipcRenderer.invoke('update-global-shortcuts', merged);
         }
       } catch (e) {
         console.error('❌ [Overlay] Failed to initialize voice provider on mount:', e);
@@ -398,74 +416,11 @@ const OverlayApp: React.FC = () => {
     }
   }, []);
   
-  const handleSaveOverlayApiSettings = async () => {
-    try {
-      setOverlaySaving(true);
-      setOverlaySaveError(null);
-      setOverlaySaveSuccess(false);
-
-      const userStr = localStorage.getItem(LS_USER_KEY);
-      if (!userStr) throw new Error('User not logged in');
-      const user = JSON.parse(userStr);
-      if (!user._id) throw new Error('User ID missing');
-
-      // Update API key in DB
-      const responseKey = await fetch(`${API_BASE_URL}/api/auth/api-key`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user._id,
-          provider: overlayApiProvider,
-          apiKey: overlayApiKey
-        })
-      });
-      if (!responseKey.ok) {
-        const err = await responseKey.json();
-        throw new Error(err.message || 'Failed to save API key');
-      }
-
-      // Update provider in DB
-      const responseProvider = await fetch(`${API_BASE_URL}/api/auth/provider`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user._id, provider: overlayApiProvider })
-      });
-      if (!responseProvider.ok) {
-        const err = await responseProvider.json();
-        throw new Error(err.message || 'Failed to save provider');
-      }
-
-      // Update localStorage
-      const updatedKeys = (() => {
-        const existing = localStorage.getItem(LS_API_KEYS);
-        let parsed: any = {};
-        try { parsed = existing ? JSON.parse(existing) : {}; } catch (e) {}
-        return { ...parsed, [overlayApiProvider]: overlayApiKey };
-      })();
-      localStorage.setItem(LS_API_KEYS, JSON.stringify(updatedKeys));
-      localStorage.setItem(LS_API_PROVIDER, overlayApiProvider);
-
-      // Update local state
-      setApiKey(overlayApiKey);
-      setOverlaySaveSuccess(true);
-      setTimeout(() => setOverlaySaveSuccess(false), 2000);
-
-      // Notify main window/overlay listeners
-      if (typeof window !== 'undefined' && (window as any).require) {
-        const { ipcRenderer } = (window as any).require('electron');
-        ipcRenderer.send('notify-overlay-settings-changed');
-      }
-    } catch (err: any) {
-      console.error('❌ Overlay API save error:', err);
-      setOverlaySaveError(err.message || 'Failed to save settings');
-    } finally {
-      setOverlaySaving(false);
-    }
-  };
   const [showSettingsConfirm, setShowSettingsConfirm] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [currentPairIndex, setCurrentPairIndex] = useState(0); // For Q&A navigation
   const [apiError, setApiError] = useState<{title: string, message: string, details?: string} | null>(null);
+  const [shortcuts, setShortcuts] = useState<any>({});
   const [qaPairs, setQaPairs] = useState<Array<{question: string, answer: string}>>([]); // Q&A pairs
   const [newPairTrigger, setNewPairTrigger] = useState(0); // Trigger to force navigation to latest
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -487,6 +442,10 @@ const OverlayApp: React.FC = () => {
   const analyzeScreenRef = useRef<(() => Promise<void>) | null>(null); // For shortcut access
   const wantToListenRef = useRef(false); // Track if user wants to listen
   const getAnswerRef = useRef<(() => Promise<void>) | null>(null); // For Ctrl+Enter shortcut
+  const startListenRef = useRef<(() => void) | null>(null);
+  const stopListenRef = useRef<(() => void) | null>(null);
+  const isListeningRef = useRef(false);
+  const isGeneratingRef = useRef(false);
   const transcribedTextRef = useRef(''); // For IPC handler access
   const manualTextInputRef = useRef(''); // For IPC handler access
   const toggleBrowseAIRef = useRef<(() => void) | null>(null); // For Ctrl+[ shortcut
@@ -825,8 +784,6 @@ const OverlayApp: React.FC = () => {
         const apiKeys = JSON.parse(apiKeysStr);
         const key = apiKeys[apiProvider as 'gemini' | 'openai' | 'claude' | 'groq'];
         if (key) setApiKey(key);
-        setOverlayApiProvider(apiProvider);
-        if (key) setOverlayApiKey(key);
       } catch (e) {
         console.error('Failed to parse API keys:', e);
       }
@@ -861,7 +818,7 @@ const OverlayApp: React.FC = () => {
           console.error('🐍 Python error:', message.message);
         } else if (message.type === 'fatal') {
           console.error('🐍 Python fatal error:', message.message);
-          alert(`Fatal error: ${message.message}\nPlease ensure Python and SpeechRecognition library are installed.`);
+          setModalInfo({ title: 'Python Fatal Error', message: `${message.message}\nPlease ensure Python and SpeechRecognition library are installed.`, variant: 'error', icon: '🐍' });
           setIsListening(false);
         } else if (message.type === 'ready') {
           console.log('✅ Python speech bridge ready!');
@@ -917,9 +874,7 @@ const OverlayApp: React.FC = () => {
             const key = keys[provider];
             if (key) {
               setApiKey(key);
-              setOverlayApiKey(key);
             }
-            setOverlayApiProvider(provider);
           } catch (e) {
             console.error('Failed to parse API keys on settings-updated:', e);
           }
@@ -951,7 +906,6 @@ const OverlayApp: React.FC = () => {
               
               ipcRenderer.send('init-voice-provider', {
                 voiceProvider,
-                apiKey,
                 language: dgLang,
                 keyterms: dgKeyterms
               });
@@ -1028,7 +982,7 @@ const OverlayApp: React.FC = () => {
       });
 
       // Listen for Ctrl+\ shortcut
-      ipcRenderer.on('toggle-listen-answer', () => {
+      ipcRenderer.on('toggle-listen-answer', async () => {
         console.log('🎤 Toggle Listen/Answer shortcut received in overlay');
         console.log('🔍 isStartedRef.current:', isStartedRef.current);
         
@@ -1065,7 +1019,8 @@ const OverlayApp: React.FC = () => {
           
           if (isElectronRef.current) {
             console.log('🎤 Starting voice capture in Electron');
-            handleStartListen();
+            await handleStartListen();
+            console.log('✅ Voice capture start completed');
           } else if (recognitionRef.current) {
             // Browser: Use Web Speech API
             try {
@@ -1342,22 +1297,140 @@ const OverlayApp: React.FC = () => {
     manualTextInputRef.current = manualTextInput;
   }, [manualTextInput]);
 
+  useEffect(() => {
+    isListeningRef.current = isListening;
+  }, [isListening]);
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  // Load configurable shortcuts from localStorage
+  useEffect(() => {
+    try {
+      const userStr = localStorage.getItem(LS_USER_KEY);
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const defaults = getDefaultShortcuts();
+        const merged = { ...defaults };
+        if (user.shortcuts) {
+          for (const [action, val] of Object.entries(user.shortcuts)) {
+            const userShortcut = val as any;
+            const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action;
+            merged[mappedAction] = {
+              ...(defaults[mappedAction] || {}),
+              modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
+              defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
+            };
+          }
+        }
+        setShortcuts(merged);
+      } else {
+        setShortcuts(getDefaultShortcuts());
+      }
+    } catch (e) {
+      console.error('[Overlay] Failed to load shortcuts:', e);
+      setShortcuts(getDefaultShortcuts());
+    }
+  }, []);
+
+  // Configurable shortcut keydown handler
+  useEffect(() => {
+    const handleShortcutKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const pressedKey = e.key.toLowerCase();
+      const hasCtrl = e.ctrlKey || e.metaKey;
+      const hasShift = e.shiftKey;
+      const hasAlt = e.altKey;
+
+      for (const [action, config] of Object.entries(shortcuts) as [string, ShortcutConfig][]) {
+        const mod = config.modifier.toLowerCase();
+        const configKey = config.defaultKey.toLowerCase();
+
+        const modMatch =
+          (mod === 'control' && hasCtrl) ||
+          (mod === 'meta' && (e.metaKey || hasCtrl)) ||
+          (mod === 'alt' && hasAlt) ||
+          (mod === 'shift' && hasShift);
+
+        const keyMatch = config.defaultKey.trim() === ''
+          ? (pressedKey === config.modifier.toLowerCase())
+          : (pressedKey === configKey);
+
+        if (modMatch && keyMatch && (!hasAlt || mod === 'alt')) {
+          e.preventDefault();
+          console.log(`[Overlay] Shortcut triggered: ${action}`);
+
+          switch (action) {
+            case 'toggleOverlay':
+              if (isElectronRef.current) {
+                ipcRendererRef.current?.send('launch-stealth-pip');
+              }
+              break;
+            case 'toggleListen':
+              if (isListeningRef.current) {
+                if (stopListenRef.current) stopListenRef.current();
+              } else {
+                if (startListenRef.current) startListenRef.current();
+              }
+              break;
+            case 'getAnswer':
+              if (!isGeneratingRef.current) {
+                const text = (isListeningRef.current ? transcribedTextRef.current : manualTextInputRef.current).trim();
+                if (text && getAnswerRef.current) {
+                  getAnswerRef.current();
+                }
+              }
+              break;
+            case 'clearQuestion':
+              setManualTextInput('');
+              setTranscribedText('');
+              setCommittedText('');
+              setInterimText('');
+              break;
+            case 'focusInput':
+              if (inputFieldRef.current) inputFieldRef.current.focus();
+              break;
+            case 'stopOrClear':
+              if (isGeneratingRef.current) {
+                handleStopResponse();
+              } else {
+                setManualTextInput('');
+                setTranscribedText('');
+                setCommittedText('');
+                setInterimText('');
+                setAiResponse('');
+              }
+              break;
+          }
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcutKeyDown, true);
+    return () => window.removeEventListener('keydown', handleShortcutKeyDown, true);
+  }, [shortcuts]);
+
   // Global Shift, ESC, and Ctrl+Backspace shortcuts
   useEffect(() => {
     const handleGlobalKeyPress = (e: KeyboardEvent) => {
-      // Shift key - Toggle focus on input field
-      if (e.key === 'Shift' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.defaultPrevented) return;
+      
+      // Alt key - Toggle focus on input field
+      if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         const activeElement = document.activeElement;
         const isInputFocused = activeElement === inputFieldRef.current;
         
         if (isInputFocused) {
-          // If focused, blur it (unfocus)
           inputFieldRef.current?.blur();
-          console.log('⌨️ Shift pressed - Unfocusing input field (for arrow navigation)');
+          console.log('⌨️ Alt pressed - Unfocusing input field (for arrow navigation)');
         } else {
-          // If not focused, focus it
           inputFieldRef.current?.focus();
-          console.log('⌨️ Shift pressed - Focusing input field');
+          console.log('⌨️ Alt pressed - Focusing input field');
         }
       }
       
@@ -1397,6 +1470,12 @@ const OverlayApp: React.FC = () => {
 
   // Start Listen
   const handleStartListen = async () => {
+    if (isStartedRef.current) {
+      console.log('⏭️ handleStartListen skipped - already started');
+      return;
+    }
+    isStartedRef.current = true;
+
     overlayLog('handleStartListen called', {
       isElectron: isElectronRef.current,
       provider: currentVoiceProvider,
@@ -1408,7 +1487,26 @@ const OverlayApp: React.FC = () => {
     // Don't clear manualTextInput - keep existing typed text
     setAiResponse('');
     
-    const startDeepgramRecorder = async (stream: MediaStream, apiKey: string, language: string) => {
+    const startDeepgramRecorder = async (stream: MediaStream, language: string, keyterms: string) => {
+      // Clean up any previous capture session before starting a new one
+      if (deepgramWsRef.current) {
+        try { deepgramWsRef.current.close(); } catch (e) {}
+        deepgramWsRef.current = null;
+      }
+      if (mediaRecorderRef.current) {
+        try {
+          mediaRecorderRef.current.ondataavailable = null;
+          mediaRecorderRef.current.onstop = null;
+          if (mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        } catch (e) {}
+        mediaRecorderRef.current = null;
+      }
+      if (deepgramAudioRef.current) {
+        try { deepgramAudioRef.current.getTracks().forEach((track) => track.stop()); } catch (e) {}
+        deepgramAudioRef.current = null;
+      }
       deepgramAudioRef.current = stream;
       overlayLog('Deepgram recorder start. Track count:', stream.getAudioTracks().length);
       const preferredMime =
@@ -1421,8 +1519,12 @@ const OverlayApp: React.FC = () => {
         : new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
       mediaRecorderRef.current = mediaRecorder;
 
+      // Start recorder immediately so audio chunks are buffered while WS connects
+      overlayLog('Starting MediaRecorder immediately (parallel with WS connect)');
+      mediaRecorder.start(100);
+
       const ws = new WebSocket(
-        `${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(language || 'en-US')}`
+        `${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(language || 'en-US')}&keyterms=${encodeURIComponent(keyterms || '')}`
       );
       deepgramWsRef.current = ws;
 
@@ -1449,8 +1551,7 @@ const OverlayApp: React.FC = () => {
       };
       
       ws.onopen = () => {
-        overlayLog('Deepgram WS open, starting recorder immediately...');
-        mediaRecorder.start(100);
+        overlayLog('Deepgram WS open (recorder already running)');
       };
       
       ws.onmessage = (event) => {
@@ -1528,18 +1629,30 @@ const OverlayApp: React.FC = () => {
       }
     };
 
-    const getOverlayDeepgramConfig = () => {
+    const getOverlayDeepgramConfig = async () => {
       try {
         const userStr = localStorage.getItem(LS_USER_KEY);
         if (!userStr) return null;
         const user = JSON.parse(userStr);
-        const apiKey = (user.deepgramApiKey || '').trim();
-        if (!apiKey) return null;
-        return {
-          apiKey,
-          language: user.deepgramLanguage || currentLanguage || 'en-US',
-        };
+        // If user has a personal key, use it
+        if (user.deepgramApiKey && user.deepgramApiKey.trim()) {
+          return {
+            apiKey: user.deepgramApiKey,
+            provider: 'deepgram',
+            language: user.deepgramLanguage || currentLanguage || 'multi',
+            keyterms: user.deepgramKeyterms || ''
+          };
+        }
+        // Otherwise try to resolve from system chain (super admin configured)
+        const chainConfig = await resolveDeepgramConfig(user);
+        if (chainConfig.apiKey) {
+          console.log('[Overlay] Using system Deepgram chain config for user');
+          return chainConfig;
+        }
+        // No Deepgram available at all
+        return null;
       } catch (e) {
+        console.error('[Overlay] Failed to get Deepgram config:', e);
         return null;
       }
     };
@@ -1556,13 +1669,32 @@ const OverlayApp: React.FC = () => {
       return 'default';
     })();
 
-    if (isElectronRef.current && (currentVoiceProvider === 'deepgram' || voiceProviderFromStorage === 'deepgram')) {
-      const deepgramConfig = getOverlayDeepgramConfig();
+    // ALSO resolve system Deepgram chain: if super admin configured Deepgram, use it
+    // even if the user has voiceProvider='default' (they have no personal key)
+    let effectiveDeepgramProvider = (currentVoiceProvider === 'deepgram' || voiceProviderFromStorage === 'deepgram');
+    if (!effectiveDeepgramProvider) {
+      try {
+        const userStr = localStorage.getItem(LS_USER_KEY);
+        const user = userStr ? JSON.parse(userStr) : null;
+        const sysDgConfig = await resolveDeepgramConfig(user);
+        if (sysDgConfig && sysDgConfig.apiKey) {
+          console.log('🎤 [Overlay] System Deepgram chain active, overriding voice provider to deepgram');
+          effectiveDeepgramProvider = true;
+          // Update state to reflect deepgram is active
+          setCurrentVoiceProvider('deepgram');
+        }
+      } catch (e) {
+        console.warn('🎤 [Overlay] Failed to check system Deepgram chain:', e);
+      }
+    }
+
+    if (isElectronRef.current && effectiveDeepgramProvider) {
+      const deepgramConfig = await getOverlayDeepgramConfig();
       if (!deepgramConfig) {
-        console.error('❌ Deepgram selected but API key is missing');
+        console.error('❌ Deepgram selected but configuration is missing');
         setIsListening(false);
         isStartedRef.current = false;
-        setAiResponse('Deepgram is selected, but API key is missing. Add key in settings and try again.');
+        setAiResponse('Deepgram configuration is missing. Please check system settings.');
         return;
       } else {
         try {
@@ -1674,7 +1806,7 @@ const OverlayApp: React.FC = () => {
             throw new Error('No stream available');
           }
 
-          await startDeepgramRecorder(stream, deepgramConfig.apiKey, deepgramConfig.language);
+          await startDeepgramRecorder(stream, deepgramConfig.language, deepgramConfig.keyterms);
           setIsListening(true);
           isStartedRef.current = true;
           overlayLog('Started Deepgram in Electron renderer');
@@ -1711,32 +1843,43 @@ const OverlayApp: React.FC = () => {
   };
 
   const handleStopListen = () => {
+    wantToListenRef.current = false;
     if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current) {
       const currentText = transcribedText.trim();
       isStartedRef.current = false;
       setIsListening(false);
+      audioChunksRef.current = [];
 
-      // Copy transcribed text to manual input so question bar keeps showing it
-      // COMMENTED OUT FOR TESTING
-      // if (currentText) {
-      //   setManualTextInput(currentText);
-      // }
-
-      try {
-        if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {
-          deepgramWsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
-        }
-      } catch (e) {}
-
-      try { deepgramWsRef.current?.close(); } catch (e) {}
-      deepgramWsRef.current = null;
-
-      try {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
-        }
-      } catch (e) {}
+      // Stop MediaRecorder first to prevent any more audio chunks
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        try {
+          recorder.ondataavailable = null;
+          recorder.onstop = null;
+          if (recorder.state !== 'inactive') {
+            recorder.stop();
+          }
+        } catch (e) {}
+      }
       mediaRecorderRef.current = null;
+
+      // Send CloseStream signal to backend, then close WebSocket
+      const ws = deepgramWsRef.current;
+      if (ws) {
+        try {
+          if (ws.readyState !== WebSocket.CLOSED) {
+            ws.send(JSON.stringify({ type: 'CloseStream' }));
+            ws.close();
+          }
+        } catch (e) {}
+        try {
+          ws.onmessage = null;
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onerror = null;
+        } catch (e) {}
+      }
+      deepgramWsRef.current = null;
 
       try {
         deepgramAudioRef.current?.getTracks().forEach((track) => track.stop());
@@ -1809,6 +1952,7 @@ const OverlayApp: React.FC = () => {
       // Browser: Stop Web Speech API and transfer text
       const currentText = transcribedText.trim();
       isStartedRef.current = false;
+      wantToListenRef.current = false;
       setIsListening(false);
       
       // Only update if we got actual transcription, otherwise keep existing text
@@ -1822,7 +1966,13 @@ const OverlayApp: React.FC = () => {
       setCommittedText('');
       setInterimText('');
       if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
+        try {
+          if (typeof recognitionRef.current.abort === 'function') {
+            recognitionRef.current.abort();
+          } else {
+            recognitionRef.current.stop();
+          }
+        } catch (e) {}
       }
       
       // Check if we should auto-send to AI (from Ctrl+Enter while listening)
@@ -1877,48 +2027,7 @@ const OverlayApp: React.FC = () => {
         return;
       }
 
-    const savedCustomKey = localStorage.getItem('isa_api_keys');
-    const savedProvider = localStorage.getItem('isa_api_provider') || 'gemini';
-    let activeApiKey = apiKey;
-    
-    console.log('🔍 Overlay - Checking localStorage for API keys');
-    console.log('📦 isa_api_keys:', savedCustomKey);
-    console.log('📡 isa_api_provider:', savedProvider);
-    
-    if (savedCustomKey) {
-      try {
-        const keys = JSON.parse(savedCustomKey);
-        activeApiKey = keys[savedProvider as 'gemini' | 'openai' | 'claude' | 'groq'] || apiKey;
-        console.log('🔑 Active API key:', activeApiKey ? activeApiKey.substring(0, 10) + '...' : 'NONE');
-      } catch (e) {
-        console.error('Failed to parse API keys:', e);
-      }
-    } else {
-      console.warn('⚠️ No API keys found in localStorage!');
-    }
-
-    if (!questionToAnswer || !activeApiKey) {
-      if (!activeApiKey) {
-        // Custom message box for overlay
-        const messageBox = document.createElement('div');
-        messageBox.innerHTML = `
-          <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-            <div style="background: #1f2937; border: 2px solid #ef4444; border-radius: 16px; padding: 32px; max-width: 400px; box-shadow: 0 20px 60px rgba(239, 68, 68, 0.4);">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                <h3 style="color: #ef4444; font-size: 24px; font-weight: bold; margin-bottom: 8px;">API Key Not Configured</h3>
-              </div>
-              <p style="color: #cbd5e1; font-size: 16px; line-height: 1.6; margin-bottom: 24px; text-align: center;">
-                Please configure your AI provider API key in the <strong style="color: white;">Main App Settings</strong> to start getting answers.
-              </p>
-              <button onclick="this.parentElement.parentElement.remove()" style="width: 100%; background: #ef4444; color: white; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
-                Got It
-              </button>
-            </div>
-          </div>
-        `;
-        document.body.appendChild(messageBox);
-      }
+    if (!questionToAnswer) {
       return;
     }
 
@@ -1930,7 +2039,7 @@ const OverlayApp: React.FC = () => {
         const user = JSON.parse(savedUser);
         
         // First check locally if user is admin (skip API call for admins)
-        const isLocalAdmin = user.role === 'admin' || user.tokens === -1;
+        const isLocalAdmin = user.role === 'admin' || user.role === 'super-admin' || user.tokens === -1;
         
         if (!isLocalAdmin) {
           const tokenCheck = await tokensClient.checkTokens(user._id);
@@ -1938,34 +2047,7 @@ const OverlayApp: React.FC = () => {
           console.log('🔍 Token check result (overlay):', tokenCheck);
           
           if (!tokenCheck.canSendMessage && !tokenCheck.isAdmin && !tokenCheck.hasUnlimitedTokens) {
-            // Show "Out of Tokens" modal in overlay
-            const messageBox = document.createElement('div');
-            messageBox.id = 'out-of-tokens-modal-overlay';
-            messageBox.innerHTML = `
-              <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-                <div style="background: #1f2937; border: 2px solid #f59e0b; border-radius: 16px; padding: 32px; max-width: 450px; box-shadow: 0 20px 60px rgba(245, 158, 11, 0.4);">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">🪙</div>
-                    <h3 style="color: #f59e0b; font-size: 24px; font-weight: bold; margin-bottom: 8px;">Out of Tokens</h3>
-                  </div>
-                  <p style="color: #cbd5e1; font-size: 16px; line-height: 1.6; margin-bottom: 24px; text-align: center;">
-                    You've used all <strong style="color: white;">10 free trial tokens</strong> (1 token = 1 question).
-                    <br/><br/>
-                    <strong style="color: #f59e0b;">Upgrade to Pro</strong> in the main app to get unlimited tokens!
-                  </p>
-                  <button id="close-overlay-modal-btn" style="width: 100%; background: #f59e0b; color: white; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#d97706'" onmouseout="this.style.background='#f59e0b'">
-                    Close
-                  </button>
-                </div>
-              </div>
-            `;
-            document.body.appendChild(messageBox);
-            
-            // Add event listener
-            document.getElementById('close-overlay-modal-btn')?.addEventListener('click', () => {
-              document.getElementById('out-of-tokens-modal-overlay')?.remove();
-            });
-            
+            setShowOutOfTokensModal(true);
             console.log('❌ Out of tokens! Current:', tokenCheck.tokens);
             return;
           }
@@ -2102,7 +2184,7 @@ Respond in ${langDisplay}.]`
 
       let streamedText = '';
 
-      // Prepare messages based on provider format
+      // Prepare messages in universal OpenAI format (backend converts for Gemini if needed)
       let apiMessages: any[] = [];
       
       // Match Electron: use contextMessages setting to bound history
@@ -2112,21 +2194,18 @@ Respond in ${langDisplay}.]`
         ? chatHistory.slice(-limitMessages)
         : chatHistory;
       
-      if (savedProvider === 'gemini') {
-        // Gemini format
-        apiMessages = trimmedHistory.map((msg: any) => ({
-          role: msg.role,
-          parts: msg.parts || [{ text: msg.content || '' }]
-        }));
-        apiMessages.push({ role: 'user', parts: [{ text: fullPrompt }] });
-      } else {
-        // OpenAI/Claude/Groq format
-        apiMessages = trimmedHistory.map((msg: any) => ({
-          role: msg.role === 'model' ? 'assistant' : msg.role,
-          content: msg.parts?.[0]?.text || msg.content || ''
-        }));
-        apiMessages.push({ role: 'user', content: fullPrompt });
+      apiMessages = trimmedHistory.map((msg: any) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.parts?.[0]?.text || msg.content || ''
+      }));
+
+      // Inject context instruction into the question so the AI sees it right with the prompt
+      let promptWithContext = fullPrompt;
+      if (trimmedHistory.length > 0) {
+        promptWithContext = `[CONTEXT NOTE]\nThe conversation history above is provided for reference.\n- If the user's new question relates to the previous discussion (follow-up, clarification, deeper dive on same topic), answer IN CONTEXT of that history.\n- If it's a completely new/unrelated topic, answer independently WITHOUT referencing the history.\n\n${fullPrompt}`;
       }
+
+      apiMessages.push({ role: 'user', content: promptWithContext });
 
       // Use streaming endpoint
       console.log('📡 Overlay: Starting streaming response...');
@@ -2134,9 +2213,7 @@ Respond in ${langDisplay}.]`
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: apiMessages,
-          apiProvider: savedProvider,
-          apiKey: activeApiKey
+          messages: apiMessages
         }),
         signal: controller.signal
       });
@@ -2228,6 +2305,25 @@ Respond in ${langDisplay}.]`
 
   // Analyze Screen (silent screenshot + AI vision)
   const handleAnalyzeScreen = async () => {
+    const userStr = localStorage.getItem(LS_USER_KEY);
+    if (userStr) {
+      try {
+        const currentUser = JSON.parse(userStr);
+        const plan = (currentUser.plan || '').toLowerCase();
+        const role = (currentUser.role || '').toLowerCase();
+        const hasAccess = ['pro', 'premium', 'lifetime'].includes(plan) || ['admin', 'super-admin'].includes(role);
+        if (!hasAccess) {
+          setShowUpgradeModal(true);
+          return;
+        }
+      } catch (e) {
+        console.error('❌ [AnalyzeScreen] Failed to parse user:', e);
+      }
+    } else {
+      setShowUpgradeModal(true);
+      return;
+    }
+    
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
       
@@ -2251,26 +2347,6 @@ Respond in ${langDisplay}.]`
       
       setIsAnalyzing(true);
       setAiResponse('Analyzing screen content...');
-      
-      const savedCustomKey = localStorage.getItem('isa_api_keys');
-      const savedProvider = localStorage.getItem('isa_api_provider') || 'gemini';
-      let activeApiKey = apiKey;
-      
-      console.log('🔍 Analyze Screen - Checking localStorage for API keys');
-      console.log('📦 isa_api_keys:', savedCustomKey);
-      console.log('📡 isa_api_provider:', savedProvider);
-      
-      if (savedCustomKey) {
-        try {
-          const keys = JSON.parse(savedCustomKey);
-          activeApiKey = keys[savedProvider as 'gemini' | 'openai' | 'claude' | 'groq'] || apiKey;
-          console.log('🔑 Active API key:', activeApiKey ? activeApiKey.substring(0, 10) + '...' : 'NONE');
-        } catch (e) {
-          console.error('Failed to parse API keys:', e);
-        }
-      } else {
-        console.warn('⚠️ No API keys found in localStorage!');
-      }
 
       // Get user's optional message/question
       const userMessage = (isListening ? transcribedText : manualTextInput).trim();
@@ -2309,143 +2385,25 @@ Respond in ${langDisplay}.]`
           contextPrompt += `\n\nUser's Specific Question: "${userMessage}"`;
         }
 
-        let text = '';
+        // Send to backend which uses system chain to determine provider
+        console.log('📸 Sending screen analysis to backend...');
+        const response = await fetch(`${API_BASE_URL}/api/analyze-screen`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64Data,
+            messages: chatHistory,
+            prompt: contextPrompt
+          })
+        });
 
-        // API call based on provider
-        if (savedProvider === 'gemini') {
-          // Build message with image (Gemini format)
-          const currentTurn = {
-            role: 'user',
-            parts: [
-              { text: contextPrompt },
-              { inline_data: { mime_type: "image/png", data: base64Data } }
-            ]
-          };
-
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeApiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [...chatHistory, currentTurn]
-              })
-            }
-          );
-
-          if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-          const data = await response.json();
-          text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No content found to analyze.';
-
-        } else if (savedProvider === 'openai') {
-          // OpenAI Vision format
-          const openaiHistory = chatHistory.map((msg: any) => ({
-            role: msg.role === 'model' ? 'assistant' : msg.role,
-            content: msg.parts?.[0]?.text || msg.content || ''
-          }));
-
-          openaiHistory.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: contextPrompt },
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Data}` } }
-            ]
-          });
-
-          const response = await fetch(
-            'https://api.openai.com/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${activeApiKey}`
-              },
-              body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: openaiHistory,
-                max_tokens: 4000
-              })
-            }
-          );
-
-          if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-          const data = await response.json();
-          text = data.choices?.[0]?.message?.content || 'No content found to analyze.';
-
-        } else if (savedProvider === 'claude') {
-          // Claude Vision format
-          const claudeHistory = chatHistory.map((msg: any) => ({
-            role: msg.role === 'model' ? 'assistant' : msg.role,
-            content: msg.parts?.[0]?.text || msg.content || ''
-          }));
-
-          claudeHistory.push({
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64Data } },
-              { type: 'text', text: contextPrompt }
-            ]
-          });
-
-          const response = await fetch(
-            'https://api.anthropic.com/v1/messages',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': activeApiKey,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-3-5-sonnet-20241022',
-                max_tokens: 4000,
-                messages: claudeHistory
-              })
-            }
-          );
-
-          if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-          const data = await response.json();
-          text = data.content?.[0]?.text || 'No content found to analyze.';
-        } else if (savedProvider === 'groq') {
-          // Groq Vision format (OpenAI-compatible)
-          const groqHistory = chatHistory.map((msg: any) => ({
-            role: msg.role === 'model' ? 'assistant' : msg.role,
-            content: msg.parts?.[0]?.text || msg.content || ''
-          }));
-
-          groqHistory.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: contextPrompt },
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Data}` } }
-            ]
-          });
-
-          const response = await fetch(
-            'https://api.groq.com/openai/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${activeApiKey}`
-              },
-              body: JSON.stringify({
-                model: 'meta-llama/llama-4-scout-17b-16e-instruct', // Groq Llama 4 Scout model
-                messages: groqHistory,
-                max_tokens: 4000
-              })
-            }
-          );
-
-          if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-          const data = await response.json();
-          text = data.choices?.[0]?.message?.content || 'No content found to analyze.';
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || `API error: ${response.status}`);
         }
+
+        const data = await response.json();
+        const text = data.text || 'No content found to analyze.';
 
         setAiResponse(text);
 
@@ -2486,16 +2444,33 @@ Respond in ${langDisplay}.]`
 
   // Browser Control Functions - Toggle BrowseAI
   const handleToggleBrowseAI = () => {
+    const userStr = localStorage.getItem(LS_USER_KEY);
+    if (userStr) {
+      try {
+        const currentUser = JSON.parse(userStr);
+        const plan = (currentUser.plan || '').toLowerCase();
+        const role = (currentUser.role || '').toLowerCase();
+        const hasAccess = ['pro', 'premium', 'lifetime'].includes(plan) || ['admin', 'super-admin'].includes(role);
+        if (!hasAccess) {
+          setShowUpgradeModal(true);
+          return;
+        }
+      } catch (e) {
+        console.error('❌ [BrowseAI] Failed to parse user:', e);
+      }
+    } else {
+      setShowUpgradeModal(true);
+      return;
+    }
+    
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
       
       if (browserMode) {
-        // Close browser and turn off toggle
         ipcRenderer.send('close-ai-browser');
         setBrowserMode(false);
         setBrowseAIEnabled(false);
       } else {
-        // Open browser and turn on toggle
         ipcRenderer.send('open-ai-browser', 'google');
         setBrowserMode(true);
         setBrowseAIEnabled(true);
@@ -2507,6 +2482,22 @@ Respond in ${langDisplay}.]`
   toggleBrowseAIRef.current = handleToggleBrowseAI;
   
   const handleConfirmOpenBrowser = () => {
+    const userStr = localStorage.getItem(LS_USER_KEY);
+    if (userStr) {
+      try {
+        const currentUser = JSON.parse(userStr);
+        const plan = (currentUser.plan || '').toLowerCase();
+        const role = (currentUser.role || '').toLowerCase();
+        const hasAccess = ['pro', 'premium', 'lifetime'].includes(plan) || ['admin', 'super-admin'].includes(role);
+        if (!hasAccess) {
+          setShowProviderModal(false);
+          setShowUpgradeModal(true);
+          return;
+        }
+      } catch (e) {
+        console.error('❌ [BrowseAI/Confirm] Failed to parse user:', e);
+      }
+    }
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
       ipcRenderer.send('open-ai-browser', aiProviderForBrowser);
@@ -2536,11 +2527,11 @@ Respond in ${langDisplay}.]`
           console.log('✅ Screenshot attached to AI provider');
         } else {
           console.error('❌ Failed to attach screenshot:', result.error);
-          alert(`Failed to attach screenshot: ${result.error}`);
+          setModalInfo({ title: 'Screenshot Failed', message: `Failed to attach screenshot: ${result.error}`, variant: 'error', icon: '📸' });
         }
       } catch (error: any) {
         console.error('❌ Screenshot error:', error);
-        alert(`Screenshot error: ${error.message}`);
+        setModalInfo({ title: 'Screenshot Error', message: `Screenshot error: ${error.message}`, variant: 'error', icon: '📸' });
       }
     }
   };
@@ -2562,7 +2553,7 @@ Respond in ${langDisplay}.]`
       const currentUrl = await ipcRenderer.invoke('get-browser-url');
       
       if (!currentUrl) {
-        alert('Please open a provider first (GPT, Gemini, Claude, or AI Studio)');
+        setModalInfo({ title: 'No Provider', message: 'Please open a provider first (GPT, Gemini, Claude, or AI Studio)', variant: 'warning', icon: '🌐' });
         return;
       }
       
@@ -2576,7 +2567,7 @@ Respond in ${langDisplay}.]`
       } else if (currentUrl.includes('aistudio.google.com')) {
         providerName = 'AI Studio';
       } else {
-        alert('Please navigate to a supported provider (GPT, Gemini, Claude, or AI Studio)');
+        setModalInfo({ title: 'Unsupported Provider', message: 'Please navigate to a supported provider (GPT, Gemini, Claude, or AI Studio)', variant: 'warning', icon: '🌐' });
         return;
       }
       
@@ -2640,7 +2631,7 @@ ${companyInfoSummary}`;
         }, 1000);
       } else {
         loadingAlert?.remove();
-        alert('No context available to transfer. Please configure your settings first.');
+        setModalInfo({ title: 'No Context', message: 'No context available to transfer. Please configure your settings first.', variant: 'warning', icon: '📋' });
       }
     }
   };
@@ -2781,9 +2772,11 @@ ${companyInfoSummary}`;
     console.log('🧹 Question field cleared (Q&A history preserved)');
   };
   
-  // Update ref for shortcut access
+  // Update refs for shortcut access
   analyzeScreenRef.current = handleAnalyzeScreen;
   getAnswerRef.current = handleGetAnswer;
+  startListenRef.current = handleStartListen as unknown as () => void;
+  stopListenRef.current = handleStopListen;
 
   return (
     <div className="w-full h-screen bg-gradient-to-br from-gray-900/30 via-blue-900/25 to-gray-900/30 backdrop-blur-md p-4 flex flex-col relative rounded-2xl overflow-hidden border border-blue-500/30 shadow-[0_8px_32px_0_rgba(31,38,135,0.37)]">
@@ -2863,81 +2856,139 @@ ${companyInfoSummary}`;
         <div className="relative flex items-center gap-2">
           <div className={`w-3 h-3 rounded-full shadow-lg ${isListening ? 'bg-red-500 animate-pulse shadow-red-500/70' : 'bg-emerald-400 shadow-emerald-500/70'}`}></div>
           <span className="text-white text-sm font-bold tracking-wide drop-shadow-lg">
-            Interview Assistant
+            Meeting Assistant
           </span>
         </div>
         
         {/* BrowseAI Button with Integrated Toggle */}
-        <button
-          onClick={handleToggleBrowseAI}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all backdrop-blur-sm ${
-            browserMode && browseAIEnabled
-              ? 'bg-green-500/40 hover:bg-green-500/60 text-white animate-pulse shadow-lg shadow-green-500/50 border border-green-400/50'
-              : 'bg-gray-700/20 hover:bg-gray-600/30 text-gray-200 border border-gray-500/30'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-          </svg>
-          <span>BrowseAI</span>
-          <div className={`w-2 h-2 rounded-full ${browserMode && browseAIEnabled ? 'bg-white' : 'bg-gray-500'}`}></div>
-        </button>
+        {(() => {
+          const _uStr = localStorage.getItem(LS_USER_KEY);
+          console.log('🔍 [BrowseAI/Button] localStorage userStr:', _uStr);
+          let _isFree = true;
+          let _debugPlan = 'unknown';
+          let _debugRole = 'unknown';
+          if (_uStr) {
+            try {
+              const _u = JSON.parse(_uStr);
+              _debugPlan = _u.plan || 'Free';
+              _debugRole = _u.role || 'none';
+              const _planLower = _debugPlan.toLowerCase();
+              const _roleLower = _debugRole.toLowerCase();
+              _isFree = _planLower === 'free' && !['admin', 'super-admin'].includes(_roleLower);
+              console.log('🔍 [BrowseAI/Button] plan=%s role=%s → _isFree=%s', _debugPlan, _debugRole, _isFree);
+            } catch (_e) {
+              console.error('❌ [BrowseAI/Button] JSON parse failed:', _e);
+            }
+          } else {
+            console.log('🔍 [BrowseAI/Button] No user in localStorage, defaulting _isFree=true');
+          }
+          return (
+            <button
+              onClick={_isFree ? undefined : handleToggleBrowseAI}
+              disabled={_isFree}
+              title={_isFree ? 'BrowseAI is a paid feature. Upgrade to Pro to unlock.' : ''}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all backdrop-blur-sm ${
+                _isFree
+                  ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
+                  : browserMode && browseAIEnabled
+                    ? 'bg-green-500/40 hover:bg-green-500/60 text-white animate-pulse shadow-lg shadow-green-500/50 border border-green-400/50'
+                    : 'bg-gray-700/20 hover:bg-gray-600/30 text-white border border-gray-500/30'
+              }`}
+            >
+              {_isFree ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                </svg>
+              )}
+              <span>BrowseAI</span>
+              <div className={`w-2 h-2 rounded-full ${_isFree ? 'bg-gray-600' : browserMode && browseAIEnabled ? 'bg-white' : 'bg-gray-500'}`}></div>
+            </button>
+          );
+        })()}
         
         {/* Action Buttons */}
         <div className="ml-auto flex items-center gap-2">
-          {/* Language Button (show only if Deepgram is selected) */}
-          {currentVoiceProvider === 'deepgram' && (
-            <button
-              onClick={() => {
-                setLanguageModalOpen(true);
-                hideBrowserForModal();
-              }}
-              className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-              </svg>
-              Language
-            </button>
-          )}
-          
+          {/* Language Button (always visible) */}
           <button
             onClick={() => {
-              setModelsModalOpen(true);
+              setLanguageModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-500/50"
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.5v15m7.5-7.5h-15" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
             </svg>
-            Models
+            Language
           </button>
-
+          
+          {/* Keywords Button */}
           <button
-            onClick={handleAnalyzeScreen}
-            disabled={isAnalyzing || isGenerating}
-            className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
-              isAnalyzing 
-                ? 'bg-purple-600/70 text-purple-200 animate-pulse' 
-                : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
-            }`}
-            data-action="analyze-screen"
+            onClick={() => {
+              setKeywordsModalOpen(true);
+              hideBrowserForModal();
+            }}
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
-            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+            Keywords
           </button>
+          
+
+
+          {(() => {
+            const _uStr = localStorage.getItem(LS_USER_KEY);
+            let _isFreeAS = true;
+            if (_uStr) {
+              try {
+                const _u = JSON.parse(_uStr);
+                const _planAS = (_u.plan || '').toLowerCase();
+                const _roleAS = (_u.role || '').toLowerCase();
+                _isFreeAS = !['pro', 'premium', 'lifetime'].includes(_planAS) && !['admin', 'super-admin'].includes(_roleAS);
+              } catch (_) {}
+            }
+            return (
+              <button
+                onClick={_isFreeAS ? () => setShowUpgradeModal(true) : handleAnalyzeScreen}
+                disabled={_isFreeAS ? false : isAnalyzing || isGenerating}
+                title={_isFreeAS ? 'Analyze Screen is a paid feature. Upgrade to Pro to unlock.' : ''}
+                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
+                  _isFreeAS
+                    ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
+                    : isAnalyzing 
+                      ? 'bg-purple-600/70 text-white animate-pulse' 
+                      : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
+                }`}
+                data-action="analyze-screen"
+              >
+                {_isFreeAS ? (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+                {_isFreeAS ? 'Analyze' : isAnalyzing ? 'Analyzing...' : 'Analyze'}
+              </button>
+            );
+          })()}
           
           <button
             onClick={handleStopResponse}
             disabled={!isGenerating && !isAnalyzing}
             className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${
               isGenerating || isAnalyzing 
-                ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
-                : 'bg-gray-800/50 text-gray-600 border-gray-700/30 cursor-not-allowed'
+                ? 'bg-amber-500/20 text-white hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
+                : 'bg-gray-800/50 text-white border-gray-700/30 cursor-not-allowed'
             }`}
           >
             Stop
@@ -2945,7 +2996,7 @@ ${companyInfoSummary}`;
           
           <button 
             onClick={handleClear} 
-            className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-gray-400 hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
+            className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
           >
             Clear
           </button>
@@ -3256,107 +3307,6 @@ ${companyInfoSummary}`;
         </div>
       )}
 
-      {/* Models / API Settings Modal */}
-      {modelsModalOpen && (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-white text-lg font-bold">Models / API Settings</h3>
-              <button
-                onClick={() => {
-                  setModelsModalOpen(false);
-                  showBrowserAfterModal();
-                }}
-                className="text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Provider</label>
-                <select
-                  value={overlayApiProvider}
-                  onChange={(e) => {
-                    const provider = e.target.value as 'gemini' | 'openai' | 'claude' | 'groq';
-                    setOverlayApiProvider(provider);
-                    // auto-populate API key if saved
-                    try {
-                      const keysStr = localStorage.getItem(LS_API_KEYS);
-                      if (keysStr) {
-                        const keys = JSON.parse(keysStr);
-                        const key = keys[provider];
-                        if (key) setOverlayApiKey(key);
-                        else setOverlayApiKey('');
-                      } else {
-                        setOverlayApiKey('');
-                      }
-                    } catch {
-                      setOverlayApiKey('');
-                    }
-                  }}
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:border-blue-500 hover:border-blue-500 transition-colors"
-                >
-                  <option className="bg-gray-800 text-white" value="gemini">Gemini</option>
-                  <option className="bg-gray-800 text-white" value="openai">OpenAI</option>
-                  <option className="bg-gray-800 text-white" value="claude">Claude</option>
-                  <option className="bg-gray-800 text-white" value="groq">Groq</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
-                  {overlayApiProvider.toUpperCase()} API Key
-                </label>
-                <input
-                  type="password"
-                  value={overlayApiKey}
-                  onChange={(e) => setOverlayApiKey(e.target.value)}
-                  placeholder="Enter API key"
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 hover:border-blue-500 transition-colors"
-                  style={{ letterSpacing: '0.5px' }}
-                />
-              </div>
-
-              {overlaySaveError && (
-                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                  {overlaySaveError}
-                </div>
-              )}
-              {overlaySaveSuccess && (
-                <div className="text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
-                  ✓ Saved
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={handleSaveOverlayApiSettings}
-                disabled={overlaySaving}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  overlaySaving
-                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-              >
-                {overlaySaving ? 'Saving...' : 'Save & Sync'}
-              </button>
-              <button
-                onClick={() => {
-                  setModelsModalOpen(false);
-                  showBrowserAfterModal();
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Language Selection Modal */}
       {languageModalOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
@@ -3379,10 +3329,11 @@ ${companyInfoSummary}`;
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
                   Recognition Language
                 </label>
-                <select
+                <SearchableLanguageSelect
                   value={currentLanguage}
-                  onChange={async (e) => {
-                    const newLang = e.target.value;
+                  selectOnly
+                  options={DEEPGRAM_LANGUAGES}
+                  onChange={async (newLang) => {
                     setCurrentLanguage(newLang);
                     
                     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -3422,7 +3373,6 @@ ${companyInfoSummary}`;
                             const keyterms = user.deepgramKeyterms || '';
                             ipcRenderer.send('init-voice-provider', {
                               voiceProvider: 'deepgram',
-                              apiKey: deepgramKey,
                               language: newLang,
                               keyterms: keyterms
                             });
@@ -3436,32 +3386,24 @@ ${companyInfoSummary}`;
                       console.error('❌ [Overlay] Language save error:', err);
                     }
                   }}
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:border-purple-500 hover:border-purple-500 transition-colors max-h-60 overflow-y-auto"
-                >
-                  {DEEPGRAM_LANGUAGES.map(lang => (
-                    <option key={lang.code} value={lang.code} className="bg-gray-800 text-white">
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Search language..."
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
                   Response Language
                 </label>
-                <input
-                  type="text"
-                  value={overlayUserSettings?.responseLanguage || 'ENGLISH'}
-                  onChange={(e) => {
-                    const newLang = e.target.value.toUpperCase();
-                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: newLang }));
+                <SearchableLanguageSelect
+                  value={overlayUserSettings?.responseLanguage || ''}
+                  onChange={(newLang) => {
+                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: newLang.toUpperCase() }));
                   }}
-                  onBlur={async (e) => {
-                    const newLang = e.target.value.toUpperCase();
-                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: newLang }));
+                  onBlur={async (newLang) => {
+                    const lang = newLang.toUpperCase();
+                    setOverlayUserSettings((prev: any) => ({ ...prev, responseLanguage: lang }));
                     
-                    console.log('🌐 [Overlay] Response Language change:', newLang);
+                    console.log('🌐 [Overlay] Response Language change:', lang);
                     
                     try {
                       const userStr = localStorage.getItem(LS_USER_KEY);
@@ -3477,7 +3419,7 @@ ${companyInfoSummary}`;
                           },
                           body: JSON.stringify({ 
                             userId: user._id,
-                            settings: { ...user.settings, responseLanguage: newLang }
+                            settings: { ...user.settings, responseLanguage: lang }
                           })
                         });
                         
@@ -3485,9 +3427,9 @@ ${companyInfoSummary}`;
                           console.log('✅ [Overlay] Response language saved to database');
                           
                           // Update localStorage
-                          user.settings = { ...user.settings, responseLanguage: newLang };
+                          user.settings = { ...user.settings, responseLanguage: lang };
                           localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
-                          localStorage.setItem('isa_response_language', newLang);
+                          localStorage.setItem('isa_response_language', lang);
                           
                           // Notify main app to refresh settings
                           if (typeof window !== 'undefined' && (window as any).require) {
@@ -3502,8 +3444,7 @@ ${companyInfoSummary}`;
                       console.error('❌ [Overlay] Response language save error:', err);
                     }
                   }}
-                  placeholder="e.g., ENGLISH, URDU, HINDI"
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:border-purple-500 hover:border-purple-500 transition-colors uppercase"
+                  placeholder="Search language..."
                 />
               </div>
               
@@ -3526,6 +3467,92 @@ ${companyInfoSummary}`;
                 className="flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-purple-600 hover:bg-purple-700 text-white transition-all"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Keywords Modal */}
+      {keywordsModalOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white text-lg font-bold">Important Keywords</h3>
+              <button
+                onClick={() => {
+                  setKeywordsModalOpen(false);
+                  showBrowserAfterModal();
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
+                  Keywords (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={currentKeyterms}
+                  onChange={(e) => setCurrentKeyterms(e.target.value)}
+                  placeholder="django, fastapi, restful api, kubernetes, react"
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:border-emerald-500 hover:border-emerald-500 transition-colors"
+                />
+                <p className="text-xs text-gray-500 mt-1.5">
+                  Comma-separated technical terms, names, or jargon for better speech recognition.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const userStr = localStorage.getItem(LS_USER_KEY);
+                    if (userStr) {
+                      const user = JSON.parse(userStr);
+                      const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: user._id, deepgramKeyterms: currentKeyterms })
+                      });
+                      if (response.ok) {
+                        user.deepgramKeyterms = currentKeyterms;
+                        localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
+                        setOverlayUserSettings((prev: any) => ({ ...prev, deepgramKeyterms: currentKeyterms }));
+                        if (typeof window !== 'undefined' && (window as any).require) {
+                          const { ipcRenderer } = (window as any).require('electron');
+                          ipcRenderer.send('init-voice-provider', {
+                            voiceProvider: 'deepgram',
+                            language: currentLanguage,
+                            keyterms: currentKeyterms
+                          });
+                        }
+                        console.log('✅ [Overlay] Keywords saved to database');
+                      }
+                    }
+                  } catch (err) {
+                    console.error('❌ [Overlay] Keywords save error:', err);
+                  }
+                  setKeywordsModalOpen(false);
+                  showBrowserAfterModal();
+                }}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all"
+              >
+                Save Keywords
+              </button>
+              <button
+                onClick={() => {
+                  setKeywordsModalOpen(false);
+                  showBrowserAfterModal();
+                }}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all"
+              >
+                Cancel
               </button>
             </div>
           </div>
@@ -3930,6 +3957,75 @@ ${companyInfoSummary}`;
           </div>
         </div>
       )}
+
+      {/* Out of Tokens Modal - Overlay */}
+      <StealthModal
+        isOpen={showOutOfTokensModal}
+        onClose={() => setShowOutOfTokensModal(false)}
+        title="Out of Tokens"
+        icon="🪙"
+        variant="warning"
+        primaryAction={{
+          label: 'Upgrade in Main App',
+          onClick: () => {
+            setShowOutOfTokensModal(false);
+            if (typeof window !== 'undefined' && (window as any).require) {
+              const { ipcRenderer } = (window as any).require('electron');
+              ipcRenderer.send('show-main-window');
+            }
+          }
+        }}
+        secondaryAction={{
+          label: 'Close',
+          onClick: () => setShowOutOfTokensModal(false)
+        }}
+      >
+        You've used all <strong className="text-white">10 free tokens</strong> (1 token = 1 question).
+        <br /><br />
+        <strong className="text-amber-400">Upgrade to Pro</strong> in the main app to get unlimited tokens!
+      </StealthModal>
+
+      {/* Upgrade to Pro Modal (BrowseAI gating) */}
+      <StealthModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        title="Upgrade to Pro"
+        icon="🚀"
+        variant="info"
+        primaryAction={{
+          label: 'View Pricing',
+          onClick: () => {
+            setShowUpgradeModal(false);
+            if (typeof window !== 'undefined' && (window as any).require) {
+              const { ipcRenderer } = (window as any).require('electron');
+              ipcRenderer.send('show-main-window');
+            }
+          }
+        }}
+        secondaryAction={{
+          label: 'Close',
+          onClick: () => setShowUpgradeModal(false)
+        }}
+      >
+        <strong className="text-blue-300">BrowseAI</strong> and <strong className="text-blue-300">Analyze Screen</strong> are available on <strong className="text-white">Pro</strong> and higher plans.
+        <br /><br />
+        Upgrade to unlock AI-powered browser automation, screen analysis, and unlimited tokens.
+      </StealthModal>
+
+      {/* Generic Alert Modal */}
+      <StealthModal
+        isOpen={!!modalInfo}
+        onClose={() => setModalInfo(null)}
+        title={modalInfo?.title || ''}
+        icon={modalInfo?.icon}
+        variant={modalInfo?.variant || 'info'}
+        primaryAction={{
+          label: 'OK',
+          onClick: () => setModalInfo(null)
+        }}
+      >
+        {modalInfo?.message}
+      </StealthModal>
     </div>
   );
 };

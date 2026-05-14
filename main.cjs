@@ -1,8 +1,11 @@
 require('dotenv').config();
-const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog } = require('electron');
+const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+// Set app identity to prevent "Electron" showing in task manager
+process.title = 'Stealth Assist';
 
 // ALWAYS use localhost for dev, Railway for packaged
 const LOCAL_BACKEND = 'http://localhost:3001';
@@ -13,6 +16,10 @@ const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
+
+// App icon (public/ copied to dist/ during build; fallback to public/ for dev)
+const APP_ICON_PATH = path.join(__dirname, app.isPackaged ? 'dist' : 'public', 'stealth-logo.png');
+const APP_ICON = nativeImage.createFromPath(APP_ICON_PATH);
 
 // Suppress Electron's default error dialogs for uncaught exceptions
 process.on('uncaughtException', (error) => {
@@ -185,8 +192,10 @@ function stopBackendServer() {
 function getBrowserViewSpacing(provider) {
     // Gemini and Claude need less spacing (235px)
     // GPT, Google, and AI Studio need more spacing (280px)
+    // Add extra 40px for toolbar height
     const needsMoreSpace = ['ChatGPT', 'Google', 'AI Studio'];
-    return needsMoreSpace.includes(provider) ? { y: 280, height: 300 } : { y: 240, height: 255 };
+    const baseY = needsMoreSpace.includes(provider) ? 280 : 240;
+    return { y: baseY + 40, height: (needsMoreSpace.includes(provider) ? 300 : 255) + 40 };
 }
 
 // Start Python speech bridge
@@ -741,7 +750,7 @@ ipcMain.handle('python-available', async () => {
 });
 
 // Initialize/Switch voice provider
-ipcMain.on('init-voice-provider', (event, { voiceProvider, apiKey, language, keyterms }) => {
+ipcMain.on('init-voice-provider', async (event, { voiceProvider, apiKey, language, keyterms }) => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('📡 [MAIN] IPC: init-voice-provider received');
     console.log('📡 [MAIN] Requested provider:', voiceProvider);
@@ -749,6 +758,47 @@ ipcMain.on('init-voice-provider', (event, { voiceProvider, apiKey, language, key
     console.log('📡 [MAIN] Language:', language || deepgramLanguage);
     console.log('📡 [MAIN] Keyterms:', keyterms ? 'Yes' : 'No');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    // If voiceProvider is 'deepgram' but no apiKey was provided, try to fetch from system Deepgram chain
+    if (voiceProvider === 'deepgram' && !apiKey) {
+        try {
+            console.log('🎤 [MAIN] No deepgram apiKey provided, checking system chain...');
+            const response = await fetch(`${BACKEND_URL}/api/auth/deepgram-chain-public`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data?.success && data.config?.apiKey) {
+                    apiKey = data.config.apiKey;
+                    if (!language) language = data.config.language || 'multi';
+                    if (!keyterms) keyterms = data.config.keyterms || '';
+                    console.log('✅ [MAIN] Using system Deepgram chain key');
+                }
+            }
+        } catch (err) {
+            console.error('❌ [MAIN] Failed to fetch system Deepgram chain:', err.message);
+        }
+    }
+    
+    // Even if voiceProvider is 'default', if a system Deepgram chain exists, use it
+    if (voiceProvider === 'default' && !apiKey) {
+        try {
+            console.log('🎤 [MAIN] Checking system Deepgram chain for default provider...');
+            const response = await fetch(`${BACKEND_URL}/api/auth/deepgram-chain-public`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data?.success && data.config?.apiKey) {
+                    apiKey = data.config.apiKey;
+                    if (!language) language = data.config.language || 'multi';
+                    if (!keyterms) keyterms = data.config.keyterms || '';
+                    console.log('✅ [MAIN] Using system Deepgram chain key (overriding default)');
+                    initializeVoiceProvider('deepgram', apiKey, language, keyterms);
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error('❌ [MAIN] Failed to fetch system Deepgram chain:', err.message);
+        }
+    }
+    
     initializeVoiceProvider(voiceProvider, apiKey, language || '', keyterms || '');
 });
 
@@ -807,6 +857,7 @@ function createMainWindow() {
         focusable: true,
         show: true,
         title: 'Stealth Assist',
+        icon: APP_ICON,
         backgroundColor: '#1f2937',
         webPreferences: {
             nodeIntegration: true,
@@ -962,6 +1013,7 @@ function createFloatingWidget() {
         alwaysOnTop: true,
         skipTaskbar: true,
         title: 'Stealth Assist',
+        icon: APP_ICON,
         resizable: false,
         movable: true,
         minimizable: false,
@@ -1151,6 +1203,7 @@ function createOverlayWindow() {
         focusable: true,
         show: false, // ✅ Start hidden, show when ready to prevent glitches
         title: 'Stealth Assist',
+        icon: APP_ICON,
         backgroundColor: '#00000000', // ✅ Fully transparent background
         hasShadow: true, // Keep shadow for visibility
         roundedCorners: true, // ✅ Smooth rounded edges (Windows 11+)
@@ -1620,7 +1673,119 @@ app.whenReady().then(() => {
     
     // ==================== END POWER MANAGEMENT ====================
     
-    // Register global shortcuts
+    // Helper: convert frontend shortcut config to Electron accelerator
+    const toAccelerator = (modifier, key) => {
+        const mod = modifier === 'Control' || modifier === 'Ctrl' ? 'CommandOrControl' :
+                    modifier === 'Alt' ? 'Alt' :
+                    modifier === 'Shift' ? 'Shift' :
+                    modifier === 'Meta' || modifier === 'Cmd' ? 'CommandOrControl' : '';
+        const k = key === '' ? '' : key;
+        return k ? `${mod}+${k}` : null;
+    };
+
+    // Map frontend action names to IPC channels
+    const shortcutActionMap = {
+        toggleListen:      { channel: 'toggle-listen-answer',  label: 'Toggle Listen/Answer' },
+        getAnswer:         { channel: 'trigger-direct-answer',  label: 'Direct Answer' },
+        analyzeScreen:     { channel: 'trigger-analyze-screen', label: 'Analyze Screen', overlayOnly: true },
+        toggleBrowseAI:    { channel: 'trigger-browse-ai-toggle', label: 'Toggle BrowseAI', overlayOnly: true },
+        toggleOverlay:     { channel: 'launch-stealth-pip',     label: 'Toggle Overlay' },
+    };
+
+    const dispatchShortcutToVisibleWindows = (channel, label) => {
+        const overlayReady = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible();
+        const mainReady = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+        const focused = BrowserWindow.getFocusedWindow();
+
+        // Prefer overlay when it is visible, because overlay hotkeys should work even if main is focused.
+        if (overlayReady) {
+            overlayWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to overlay window`);
+            return;
+        }
+        if (focused && mainReady && focused === mainWindow) {
+            mainWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to main window (focused)`);
+            return;
+        }
+        if (mainReady) {
+            mainWindow.webContents.send(channel);
+            console.log(`✅ ${label} sent to main window`);
+            return;
+        }
+        console.log(`⚠️ ${label} skipped: no visible window`);
+    };
+
+    // Register a global shortcut from frontend config
+    const registeredShortcuts = [];
+    const registerOneShortcut = (action, modifier, key) => {
+        const accel = toAccelerator(modifier, key);
+        if (!accel) return;
+        const entry = shortcutActionMap[action];
+        if (!entry) return;
+        try {
+            globalShortcut.register(accel, () => {
+                console.log(`🔥 ${accel} pressed - ${entry.label}`);
+                if (action === 'toggleOverlay') {
+                    // Special handling for toggleOverlay: toggle visibility with floating widget
+                    console.log(`🔥 ${accel} pressed - Toggling overlay`);
+                    if (overlayWindow) {
+                        if (overlayWindow.isVisible()) {
+                            const bounds = overlayWindow.getBounds();
+                            global.savedOverlayBounds = bounds;
+                            overlayWindow.hide();
+                            if (!floatingWidget) createFloatingWidget();
+                            floatingWidget.show();
+                            floatingWidget.focus();
+                        } else {
+                            if (floatingWidget) floatingWidget.hide();
+                            if (overlayWindow.isVisible()) overlayWindow.hide();
+                            overlayWindow.setOpacity(0);
+                            if (global.savedOverlayBounds) overlayWindow.setBounds(global.savedOverlayBounds, false);
+                            setImmediate(() => {
+                                overlayWindow.showInactive();
+                                setTimeout(() => { overlayWindow.setOpacity(1); overlayWindow.focus(); }, 16);
+                            });
+                        }
+                    }
+                } else if (entry.overlayOnly) {
+                    if (overlayWindow && overlayWindow.isVisible()) {
+                        overlayWindow.webContents.send(entry.channel);
+                    } else {
+                        console.log(`⚠️ Overlay not visible for ${entry.label}`);
+                    }
+                } else {
+                    dispatchShortcutToVisibleWindows(entry.channel, entry.label);
+                }
+            });
+            registeredShortcuts.push(accel);
+            console.log(`✅ Global shortcut ${accel} → ${entry.label}`);
+        } catch (e) {
+            console.error(`❌ Failed to register ${accel}:`, e.message);
+        }
+    };
+
+    // Register dynamic shortcuts from config
+    const registerGlobalShortcuts = (shortcutConfig) => {
+        // Unregister all previously registered dynamic shortcuts
+        for (const accel of registeredShortcuts) {
+            try { globalShortcut.unregister(accel); } catch (e) {}
+        }
+        registeredShortcuts.length = 0;
+        
+        // Keep the hardcoded overlay toggle (Ctrl+') since it has complex logic
+        // and Ctrl+Shift+I for overlay visibility
+        // Register the configurable ones
+        if (shortcutConfig) {
+            for (const [action, cfg] of Object.entries(shortcutConfig)) {
+                if (shortcutActionMap[action]) {
+                    registerOneShortcut(action, cfg.modifier, cfg.defaultKey);
+                }
+            }
+        }
+    };
+
+    // Hardcoded global shortcuts (overlay visibility, minimize/restore)
     globalShortcut.register('CommandOrControl+Shift+I', () => {
         if (overlayWindow) {
             if (overlayWindow.isVisible()) {
@@ -1633,146 +1798,54 @@ app.whenReady().then(() => {
     });
     
     globalShortcut.register('CommandOrControl+Shift+T', () => {
-        // Toggle transcription
         if (overlayWindow) {
             overlayWindow.webContents.send('toggle-transcription');
         }
     });
 
-    // Register Ctrl+' to toggle overlay minimize/restore
-    globalShortcut.register("CommandOrControl+'", () => {
-        console.log("🔥 Ctrl+' pressed - Toggling overlay");
-        
-        if (overlayWindow) {
-            if (overlayWindow.isVisible()) {
-                // Minimize: Save bounds and show widget
-                const bounds = overlayWindow.getBounds();
-                console.log('💾 Saving overlay bounds:', bounds);
-                global.savedOverlayBounds = bounds;
-                
-                overlayWindow.hide();
-                
-                // Create floating widget if doesn't exist
-                if (!floatingWidget) {
-                    createFloatingWidget();
-                }
-                floatingWidget.show();
-                floatingWidget.focus();
-                console.log('✅ Overlay minimized, widget shown');
-            } else {
-                // Restore: Ensure completely hidden, then set bounds, then show
-                console.log('🔄 Starting overlay restore...');
-                
-                // 1. Hide widget immediately
-                if (floatingWidget) {
-                    floatingWidget.hide();
-                }
-                
-                // 2. CRITICAL: Ensure overlay is completely hidden first
-                if (overlayWindow.isVisible()) {
-                    overlayWindow.hide();
-                }
-                
-                // 3. Set opacity to 0 before restoring (prevents flash)
-                overlayWindow.setOpacity(0);
-                
-                // 4. Set bounds while invisible
-                if (global.savedOverlayBounds) {
-                    console.log('✅ Restoring overlay bounds:', global.savedOverlayBounds);
-                    overlayWindow.setBounds(global.savedOverlayBounds, false);
-                }
-                
-                // 5. Use setImmediate to ensure bounds are applied before showing
-                setImmediate(() => {
-                    // 6. Show window (still invisible due to opacity 0)
-                    overlayWindow.showInactive();
-                    
-                    // 7. Restore opacity after a tiny delay (smooth fade-in)
-                    setTimeout(() => {
-                        overlayWindow.setOpacity(1);
-                        overlayWindow.focus();
-                        console.log('✅ Overlay restored smoothly with no jerk!');
-                    }, 16); // 1 frame at 60fps
-                });
-            }
-        }
+    // Ctrl+' - Toggle overlay minimize/restore (hardcoded with complex logic)
+    // Now handled by configurable toggleOverlay
+    // globalShortcut.register("CommandOrControl+'", () => {
+    //     console.log("🔥 Ctrl+' pressed - Toggling overlay");
+    //     if (overlayWindow) {
+    //         if (overlayWindow.isVisible()) {
+    //             const bounds = overlayWindow.getBounds();
+    //             global.savedOverlayBounds = bounds;
+    //             overlayWindow.hide();
+    //             if (!floatingWidget) createFloatingWidget();
+    //             floatingWidget.show();
+    //             floatingWidget.focus();
+    //         } else {
+    //             if (floatingWidget) floatingWidget.hide();
+    //             if (overlayWindow.isVisible()) overlayWindow.hide();
+    //             overlayWindow.setOpacity(0);
+    //             if (global.savedOverlayBounds) overlayWindow.setBounds(global.savedOverlayBounds, false);
+    //             setImmediate(() => {
+    //                 overlayWindow.showInactive();
+    //                 setTimeout(() => { overlayWindow.setOpacity(1); overlayWindow.focus(); }, 16);
+    //             });
+    //         }
+    //     }
+    // });
+
+    // Register default global shortcuts
+    registerGlobalShortcuts({
+        toggleListen:   { modifier: 'Control', key: '\\' },
+        getAnswer:      { modifier: 'Control', key: 'Enter' },
+        analyzeScreen:  { modifier: 'Control', key: ']' },
+        toggleBrowseAI: { modifier: 'Control', key: '[' },
+        toggleOverlay:  { modifier: 'Control', key: "'" },
     });
 
-    const dispatchShortcutToVisibleWindows = (channel, label) => {
-        const mainReady = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
-        const overlayReady = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible();
-        const focused = BrowserWindow.getFocusedWindow();
-
-        // Prefer the currently focused app window to avoid double-triggering.
-        if (focused && mainReady && focused === mainWindow) {
-            mainWindow.webContents.send(channel);
-            console.log(`✅ ${label} sent to main window (focused)`);
-            return;
-        }
-        if (focused && overlayReady && focused === overlayWindow) {
-            overlayWindow.webContents.send(channel);
-            console.log(`✅ ${label} sent to overlay window (focused)`);
-            return;
-        }
-
-        // Fallbacks when no app window is focused (or focus is elsewhere).
-        if (overlayReady) {
-            overlayWindow.webContents.send(channel);
-            console.log(`✅ ${label} sent to overlay window`);
-            return;
-        }
-        if (mainReady) {
-            mainWindow.webContents.send(channel);
-            console.log(`✅ ${label} sent to main window`);
-            return;
-        }
-
-        console.log(`⚠️ ${label} skipped: no visible window`);
-    };
-
-    // Register Ctrl+\ to toggle Start Listen / Stop & Get Answer
-    globalShortcut.register('CommandOrControl+\\', () => {
-        console.log('🎤 Ctrl+\\ pressed - Toggle Listen/Answer');
-        dispatchShortcutToVisibleWindows('toggle-listen-answer', 'Toggle Listen/Answer');
-    });
-    
-    console.log('✅ Ctrl+\\ shortcut registered:', globalShortcut.isRegistered('CommandOrControl+\\'));
-
-    // Register Ctrl+] for Analyze Screen
-    globalShortcut.register('CommandOrControl+]', () => {
-        console.log('📸 Ctrl+] pressed - Analyze Screen');
-        
-        if (overlayWindow && overlayWindow.isVisible()) {
-            overlayWindow.webContents.send('trigger-analyze-screen');
-            console.log('✅ Analyze Screen triggered');
-        } else {
-            console.log('⚠️ Overlay not visible');
+    // IPC: Frontend can update global shortcuts after saving
+    ipcMain.handle('update-global-shortcuts', async (event, shortcuts) => {
+        try {
+            registerGlobalShortcuts(shortcuts);
+            return { success: true };
+        } catch (error) {
+            return { success: false, message: error.message };
         }
     });
-    
-    console.log('✅ Ctrl+] shortcut registered:', globalShortcut.isRegistered('CommandOrControl+]'));
-    
-    // Register Ctrl+Enter for Direct Answer
-    globalShortcut.register('CommandOrControl+Return', () => {
-        console.log('⚡ Ctrl+Enter pressed - Direct Answer');
-        dispatchShortcutToVisibleWindows('trigger-direct-answer', 'Direct Answer');
-    });
-    
-    console.log('✅ Ctrl+Enter shortcut registered:', globalShortcut.isRegistered('CommandOrControl+Return'));
-    
-    // Register Ctrl+[ for BrowseAI Toggle
-    globalShortcut.register('CommandOrControl+[', () => {
-        console.log('🌐 Ctrl+[ pressed - Toggle BrowseAI');
-        
-        if (overlayWindow && overlayWindow.isVisible()) {
-            overlayWindow.webContents.send('trigger-browse-ai-toggle');
-            console.log('✅ BrowseAI toggle triggered');
-        } else {
-            console.log('⚠️ Overlay not visible');
-        }
-    });
-    
-    console.log('✅ Ctrl+[ shortcut registered:', globalShortcut.isRegistered('CommandOrControl+['));
 });
 
 app.on('window-all-closed', () => {

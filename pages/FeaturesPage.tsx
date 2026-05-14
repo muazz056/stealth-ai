@@ -121,7 +121,7 @@ const FeaturesPage: React.FC = () => {
             to="/service"
             className="inline-block px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-lg font-bold transition-all shadow-2xl shadow-blue-500/50 hover:shadow-blue-500/70 hover:scale-105 transform"
           >
-            🚀 Start Free Trial
+            🚀 Get Started Free
           </Link>
         </div>
       </div>

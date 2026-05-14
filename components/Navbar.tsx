@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDarkMode } from '../src/context/DarkModeContext';
 import { APP_CONFIG } from '../src/config';
+import TokenBadge from './TokenBadge';
 
 interface NavbarProps {
   user?: any;
@@ -17,18 +18,6 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
 
-  // Token display logic
-  const getTokenDisplay = () => {
-    if (!user) return null;
-    
-    const isAdmin = user.role === 'admin';
-    const tokens = user.tokens ?? 0;
-    
-    if (isAdmin || tokens === -1) {
-      return '∞'; // Infinity symbol for unlimited
-    }
-    return tokens;
-  };
 
   const getTokenColor = () => {
     if (!user) return 'text-slate-400';
@@ -54,14 +43,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
-            <div className="h-8 w-8 sm:h-10 sm:w-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center font-black text-white text-sm sm:text-base">
-              IA
-            </div>
+            <img src="/stealth-logo.png" alt="Stealth Assist" className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" />
             <div className="hidden sm:block">
-              <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">Interview Assist</h1>
+              <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">Stealth Assist</h1>
               <p className="text-[10px] text-slate-600 dark:text-slate-500">Stealth Engine V1.2</p>
             </div>
-            <h1 className="sm:hidden text-sm font-black text-black dark:text-white uppercase italic">IA</h1>
+            <h1 className="sm:hidden text-sm font-black text-black dark:text-white uppercase italic">SA</h1>
           </Link>
 
           {/* Desktop Navigation */}
@@ -97,24 +84,22 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
               </>
             )}
             
-            {/* Dark Mode Toggle - Web only */}
-            {!isElectron && (
-              <button
-                onClick={toggleDarkMode}
-                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all group"
-                aria-label="Toggle dark mode"
-              >
-                {isDarkMode ? (
-                  <svg className="w-5 h-5 text-yellow-500 group-hover:text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-slate-600 group-hover:text-slate-800" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                  </svg>
-                )}
-              </button>
-            )}
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all group"
+              aria-label="Toggle dark mode"
+            >
+              {isDarkMode ? (
+                <svg className="w-5 h-5 text-yellow-500 group-hover:text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 text-slate-600 group-hover:text-slate-800" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              )}
+            </button>
             
             {!user ? (
               <Link 
@@ -128,29 +113,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                 {/* Electron: Only Welcome + Logout */}
                 {isElectron ? (
                   <>
-                    {/* Tokens Display */}
-                    {user && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-200 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700/50 rounded-lg">
-                        <span className="text-xl">🪙</span>
-                        <span className={`text-sm font-bold ${getTokenColor()}`}>
-                          {getTokenDisplay()}
-                        </span>
-                        <span className="text-xs text-slate-600 dark:text-slate-500">tokens</span>
-                      </div>
-                    )}
-                    
-                    {/* Theme Toggle */}
-                    <button
-                      onClick={toggleDarkMode}
-                      className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all"
-                      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                    >
-                      {isDarkMode ? (
-                        <span className="text-lg">☀️</span>
-                      ) : (
-                        <span className="text-lg">🌙</span>
-                      )}
-                    </button>
+                    <TokenBadge user={user} onUpgrade={() => window.location.hash = '#/pricing'} />
                     
                     <span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">
                       Welcome, <span className="text-black dark:text-white font-bold">{user.name}</span>
@@ -175,31 +138,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       </button>
                     )}
                     
-                    {/* Theme Toggle */}
-                    <button
-                      onClick={toggleDarkMode}
-                      className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all"
-                      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                    >
-                      {isDarkMode ? (
-                        <span className="text-lg">☀️</span>
-                      ) : (
-                        <span className="text-lg">🌙</span>
-                      )}
-                    </button>
-                    
-                    {/* Tokens Display */}
-                    {user && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-200 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700/50 rounded-lg">
-                        <span className="text-xl">🪙</span>
-                        <span className={`text-sm font-bold ${getTokenColor()}`}>
-                          {getTokenDisplay()}
-                        </span>
-                        <span className="text-xs text-slate-600 dark:text-slate-500 hidden xl:inline">tokens</span>
-                      </div>
-                    )}
+                    <TokenBadge user={user} onUpgrade={() => window.location.hash = '#/pricing'} />
                     
                     <span className="text-xs text-slate-700 dark:text-slate-500">Welcome, {user.name}</span>
+                    
+                    {user && user.role === 'super-admin' && (
+                      <Link
+                        to="/admin/settings"
+                        className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all"
+                        title="Super Admin Settings"
+                      >
+                        🔐 Settings
+                      </Link>
+                    )}
                     
                     <button
                       onClick={onLogout}
@@ -290,16 +241,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                   {/* Electron: Only Welcome + Logout in mobile */}
                   {isElectron ? (
                     <>
-                      {/* Tokens Display */}
-                      {user && (
-                        <div className="mx-4 mb-2 flex items-center gap-2 px-3 py-2 bg-slate-200 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700/50 rounded-lg">
-                          <span className="text-xl">🪙</span>
-                          <span className={`text-sm font-bold ${getTokenColor()}`}>
-                            {getTokenDisplay()}
-                          </span>
-                          <span className="text-xs text-slate-600 dark:text-slate-500">tokens</span>
-                        </div>
-                      )}
+                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.hash = '#/pricing'; setMobileMenuOpen(false); }} />
                       
                       <div className="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">
                         Welcome, <span className="text-black dark:text-white font-bold">{user.name}</span>
@@ -317,19 +259,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                     </>
                   ) : (
                     <>
-                      {/* Web: Show all buttons in mobile */}
-                      {/* Tokens Display */}
-                      {user && (
-                        <div className="mx-4 mb-2 flex items-center gap-2 px-3 py-2 bg-slate-200 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700/50 rounded-lg">
-                          <span className="text-xl">🪙</span>
-                          <span className={`text-sm font-bold ${getTokenColor()}`}>
-                            {getTokenDisplay()}
-                          </span>
-                          <span className="text-xs text-slate-600 dark:text-slate-500">tokens</span>
-                        </div>
-                      )}
+                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.hash = '#/pricing'; setMobileMenuOpen(false); }} />
                       
                       <div className="px-4 py-2 text-sm text-slate-700 dark:text-slate-500">Welcome, {user.name}</div>
+                      
+                      {user && user.role === 'super-admin' && (
+                        <Link
+                          to="/admin/settings"
+                          onClick={() => setMobileMenuOpen(false)}
+                          className="mx-4 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-bold transition-all text-center"
+                        >
+                          🔐 Admin Settings
+                        </Link>
+                      )}
                       
                       {showSessionButton && (
                         <button

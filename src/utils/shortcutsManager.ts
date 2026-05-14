@@ -22,7 +22,6 @@ export interface ShortcutConfig {
   description: string;
   defaultKey: string;
   modifier: ModifierKey;
-  key: string;
 }
 
 export interface ShortcutsState {
@@ -59,47 +58,42 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       label: 'Overlay Open/Close',
       description: 'Open or close the overlay window',
       defaultKey: "'",
-      modifier: primaryMod,
-      key: "'"
+      modifier: primaryMod
     },
     toggleListen: {
       action: 'toggleListen',
       label: 'Start/Stop Listen',
       description: 'Start or stop voice recording',
       defaultKey: '\\',
-      modifier: primaryMod,
-      key: '\\'
+      modifier: primaryMod
     },
     analyzeScreen: {
       action: 'analyzeScreen',
       label: 'Screen Analyze',
       description: 'Analyze current screen content',
       defaultKey: ']',
-      modifier: primaryMod,
-      key: ']'
+      modifier: primaryMod
     },
     getAnswer: {
       action: 'getAnswer',
       label: 'Direct Answer',
       description: 'Get an immediate AI response',
       defaultKey: 'Enter',
-      modifier: primaryMod,
-      key: 'Enter'
+      modifier: primaryMod
     },
     clearQuestion: {
       action: 'clearQuestion',
       label: 'Clear Field',
       description: 'Clear the question input field',
       defaultKey: 'Backspace',
-      modifier: primaryMod,
-      key: 'Backspace'
+      modifier: primaryMod
     },
     focusInput: {
       action: 'focusInput',
       label: 'Focus Field',
       description: 'Focus on the question input field',
       defaultKey: '',
-      modifier: 'Shift',
+      modifier: 'Alt',
       key: ''
     },
     stopOrClear: {
@@ -107,16 +101,14 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       label: 'Clear All',
       description: 'Stop AI generation and clear everything',
       defaultKey: 'Backspace',
-      modifier: primaryMod,
-      key: 'Backspace'
+      modifier: primaryMod
     },
     toggleBrowseAI: {
       action: 'toggleBrowseAI',
       label: 'Open Browser',
       description: 'Open the BrowseAI browser',
       defaultKey: '[',
-      modifier: primaryMod,
-      key: '['
+      modifier: primaryMod
     },
     toggleTranscription: {
       action: 'toggleTranscription',
@@ -146,11 +138,11 @@ export const formatShortcut = (shortcut: ShortcutConfig): string => {
     : shortcut.modifier;
   
   // If no key, return just the modifier (single-key shortcut)
-  if (!shortcut.key || shortcut.key.trim() === '') {
+  if (!shortcut.defaultKey || shortcut.defaultKey.trim() === '') {
     return modifierName;
   }
   
-  const keyName = shortcut.key === ' ' ? 'Space' : shortcut.key;
+  const keyName = shortcut.defaultKey === ' ' ? 'Space' : shortcut.defaultKey;
   
   return `${modifierName}+${keyName}`;
 };
@@ -211,7 +203,7 @@ export const hasConflict = (shortcuts: ShortcutsState, modifier: ModifierKey, ke
   for (const [action, config] of Object.entries(shortcuts)) {
     if (excludeAction && config.action === excludeAction) continue;
     
-    const configKey = (config.key || '').toLowerCase();
+    const configKey = (config.defaultKey || '').toLowerCase();
     
     // Check if both shortcuts match (including single-key shortcuts)
     if (config.modifier === modifier && configKey === normalizedKey) {
@@ -255,13 +247,13 @@ export const matchesShortcut = (event: KeyboardEvent, shortcut: ShortcutConfig):
   if (!modifier || modifier !== shortcut.modifier) return false;
   
   // For single-key shortcuts (no second key), match if only modifier is pressed
-  if (!shortcut.key || shortcut.key.trim() === '') {
+  if (!shortcut.defaultKey || shortcut.defaultKey.trim() === '') {
     // Check if ONLY the modifier is pressed (no other keys)
     return !key || key === shortcut.modifier;
   }
   
   // For regular shortcuts, match both modifier and key
-  if (key.toLowerCase() !== shortcut.key.toLowerCase()) return false;
+  if (key.toLowerCase() !== shortcut.defaultKey.toLowerCase()) return false;
   
   return true;
 };

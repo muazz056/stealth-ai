@@ -8,6 +8,7 @@ import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import PricingPage from './pages/PricingPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import SuperAdminPage from './pages/SuperAdminPage';
 import App from './App';
 import AuthPage from './components/AuthPage';
 import { authClient } from './src/utils/authClient';
@@ -57,6 +58,15 @@ const AppRouter: React.FC = () => {
           // Validate in background (non-blocking)
           authClient.getUser(user._id).then((result) => {
             if (result && result.user) {
+              const currentSaved = localStorage.getItem(LS_USER_KEY);
+              if (currentSaved) {
+                const current = JSON.parse(currentSaved);
+                // If local user was modified after this fetch started (e.g. language change),
+                // preserve the local version instead of overwriting with stale server data
+                if (current.deepgramLanguage !== user.deepgramLanguage) {
+                  return;
+                }
+              }
               const updatedUser = { ...user, ...result.user, _id: user._id };
               setCurrentUser(updatedUser);
               localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
@@ -87,10 +97,26 @@ const AppRouter: React.FC = () => {
       });
     };
     
+    // Listen for shortcut updates from App.tsx
+    const handleShortcutUpdate = (event: any) => {
+      const { shortcuts } = event.detail;
+      console.log('⌨️ Shortcut update received in AppRouter:', shortcuts);
+      
+      // Update currentUser with new shortcuts
+      setCurrentUser((prevUser: any) => {
+        if (!prevUser) return prevUser;
+        const updatedUser = { ...prevUser, shortcuts };
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+        return updatedUser;
+      });
+    };
+    
     window.addEventListener('user-tokens-updated', handleTokenUpdate as EventListener);
+    window.addEventListener('user-shortcuts-updated', handleShortcutUpdate as EventListener);
     
     return () => {
       window.removeEventListener('user-tokens-updated', handleTokenUpdate as EventListener);
+      window.removeEventListener('user-shortcuts-updated', handleShortcutUpdate as EventListener);
     };
   }, []);
 
@@ -430,6 +456,32 @@ const AppRouter: React.FC = () => {
                     />
                     <div className="flex-grow">
                       <App key={sessionKey} user={currentUser} onLogout={handleLogout} onNewSession={handleNewSession} />
+                    </div>
+                    <Footer />
+                  </div>
+                ) : (
+                  <>
+                    <Navbar user={currentUser} onLogout={handleLogout} />
+                    <AuthPage onAuthSuccess={handleAuthSuccess} />
+                    <Footer />
+                  </>
+                )
+              }
+            />
+
+            {/* Super Admin Settings Route */}
+            <Route
+              path="/admin/settings"
+              element={
+                isAuthenticated ? (
+                  <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
+                    <Navbar 
+                      user={currentUser} 
+                      onLogout={handleLogout}
+                      showAllLinks={true}
+                    />
+                    <div className="flex-grow">
+                      <SuperAdminPage user={currentUser} />
                     </div>
                     <Footer />
                   </div>

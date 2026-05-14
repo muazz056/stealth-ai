@@ -16,6 +16,7 @@ import AuthPage from './components/AuthPage';
 import { authClient } from './src/utils/authClient';
 import { messagesClient } from './src/utils/messagesClient';
 import { tokensClient } from './src/utils/tokensClient';
+import { resolveDeepgramConfig } from './src/utils/deepgramChainClient';
 import { 
   getDefaultShortcuts, 
   ShortcutsState, 
@@ -24,9 +25,12 @@ import {
   hasConflict,
   ModifierKey,
   ShortcutAction,
-  detectOS
+  detectOS,
+  ShortcutConfig
 } from './src/utils/shortcutsManager';
 import ShortcutRecorder from './components/ShortcutRecorder';
+import StealthModal from './components/StealthModal';
+import SearchableLanguageSelect from './components/SearchableLanguageSelect';
 
 // API Base URL from environment
 // Use env var - set by Vite at build time based on mode
@@ -237,10 +241,8 @@ interface AppProps {
 
 const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   console.log('🎨 MainApp rendering with user:', user);
-  console.log('🔑 User API keys:', user?.apiKeys);
   console.log('🎯 Selected provider:', user?.selectedProvider);
-  console.log('🎤 Deepgram API key:', user?.deepgramApiKey);
-  console.log('🎙️ Voice provider:', user?.voiceProvider);
+  console.log('️ Voice provider:', user?.voiceProvider);
   
   // State
   const [resume, setResume] = useState<ResumeData | null>(null);
@@ -282,45 +284,16 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const [qaPairs, setQaPairs] = useState<Array<{question: string, answer: string}>>([]); // Q&A pairs
   const [newPairTrigger, setNewPairTrigger] = useState(0); // Trigger to force navigation to latest
   const [apiProvider, setApiProvider] = useState<'gemini' | 'openai' | 'claude' | 'groq'>((user.selectedProvider && user.selectedProvider !== '' && user.selectedProvider !== 'ollama') ? user.selectedProvider as any : 'gemini');
-  const [apiKeys, setApiKeys] = useState({
-    gemini: user.apiKeys?.gemini || '',
-    openai: user.apiKeys?.openai || '',
-    claude: user.apiKeys?.claude || '',
-    groq: user.apiKeys?.groq || ''
-  });
   
-  console.log('💾 Initial apiKeys state:', apiKeys);
-  const [tempApiKey, setTempApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showApiSuccess, setShowApiSuccess] = useState(false);
-  
-  // Voice Provider State - initialize from user prop OR localStorage fallback
-  const getInitialDeepgramKey = () => {
-    if (user?.deepgramApiKey) return user.deepgramApiKey;
-    try {
-      const saved = localStorage.getItem(LS_USER_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed?.deepgramApiKey || '';
-      }
-    } catch (e) {}
-    return '';
-  };
-  const getInitialVoiceProvider = () => {
+  // Voice Provider State
+  const [voiceProvider, setVoiceProvider] = useState<'default' | 'deepgram'>(() => {
     if (user?.voiceProvider) return user.voiceProvider;
     try {
       const saved = localStorage.getItem(LS_USER_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed?.voiceProvider || 'default';
-      }
+      if (saved) return JSON.parse(saved)?.voiceProvider || 'default';
     } catch (e) {}
     return 'default';
-  };
-  const [voiceProvider, setVoiceProvider] = useState<'default' | 'deepgram'>(getInitialVoiceProvider());
-  const [deepgramApiKey, setDeepgramApiKey] = useState(getInitialDeepgramKey());
-  const [tempDeepgramKey, setTempDeepgramKey] = useState(getInitialDeepgramKey());
-  const [showDeepgramKey, setShowDeepgramKey] = useState(false);
+  });
   const [deepgramLanguage, setDeepgramLanguage] = useState(() => {
     if (user?.deepgramLanguage) return user.deepgramLanguage;
     try {
@@ -346,24 +319,9 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const [shortcutErrors, setShortcutErrors] = useState<{[key: string]: string}>({});
   const [showShortcutsSuccess, setShowShortcutsSuccess] = useState(false);
   const [isApiConfigured, setIsApiConfigured] = useState(false);
-
-  // Sync Deepgram key, voice provider, and language when user data refreshes from backend
-  useEffect(() => {
-    const key = user?.deepgramApiKey || '';
-    const provider = user?.voiceProvider || 'default';
-    const lang = user?.deepgramLanguage || 'multi';
-    const keyterms = user?.deepgramKeyterms || '';
-    
-    // Always sync from user prop - this catches the background fetch update
-    if (key) {
-      setDeepgramApiKey(key);
-      setTempDeepgramKey(key);
-    }
-    setVoiceProvider(provider as 'default' | 'deepgram');
-    setDeepgramLanguage(lang);
-    setDeepgramKeyterms(keyterms);
-  }, [user, user?.deepgramApiKey, user?.voiceProvider, user?.deepgramLanguage, user?.deepgramKeyterms]); // Re-run when user changes
   const [apiError, setApiError] = useState<{title: string, message: string, details?: string} | null>(null);
+  const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
+  const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
   // Helper function to parse and format API errors
   const parseApiError = (error: any): {title: string, message: string, details?: string} => {
@@ -450,27 +408,34 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     onLogout();
   };
 
-  // Sync API keys when user data updates (from MongoDB)
+  // Sync user settings when user data updates (from MongoDB)
   useEffect(() => {
-    console.log('🔄 Syncing API keys from user prop:', user?.apiKeys);
-    if (user?.apiKeys) {
-      const updatedKeys = {
-        gemini: user.apiKeys.gemini || '',
-        openai: user.apiKeys.openai || '',
-        claude: user.apiKeys.claude || '',
-        groq: user.apiKeys.groq || ''
-      };
-      console.log('✨ Setting apiKeys to:', updatedKeys);
-      setApiKeys(updatedKeys);
-    }
     if (user?.selectedProvider) {
       console.log('📡 Setting provider to:', user.selectedProvider);
       setApiProvider(user.selectedProvider);
-      setIsApiConfigured(true);
+    }
+    if (user?.voiceProvider) {
+      console.log('🎤 Setting voice provider to:', user.voiceProvider);
+      setVoiceProvider(user.voiceProvider);
+    }
+    if (user?.deepgramLanguage) {
+      setDeepgramLanguage(user.deepgramLanguage);
     }
     if (user?.shortcuts) {
-      setShortcuts(user.shortcuts);
-      } else {
+      // Merge user shortcuts with frontend defaults preserving labels/descriptions
+      const defaults = getDefaultShortcuts();
+      const merged = { ...defaults };
+      for (const [action, val] of Object.entries(user.shortcuts)) {
+        const userShortcut = val as any;
+        const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action === 'startStopListen' ? 'toggleListen' : action;
+        merged[mappedAction] = {
+          ...(defaults[mappedAction] || {}),
+          modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
+          defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
+        };
+      }
+      setShortcuts(merged);
+    } else {
       setShortcuts(getDefaultShortcuts());
     }
   }, [user]);
@@ -727,22 +692,22 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   // Keyboard navigation for Q&A pairs and Shift toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Shift key - Toggle focus on input field
-      if (e.key === 'Shift' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.defaultPrevented) return;
+      
+      // Alt key - Toggle focus on input field
+      if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         const activeElement = document.activeElement;
         const isInputFocused = activeElement?.tagName === 'INPUT' || 
                                activeElement?.tagName === 'TEXTAREA';
         
         if (isInputFocused) {
-          // If focused, blur it (unfocus)
           (activeElement as HTMLElement).blur();
-          console.log('⌨️ Shift pressed - Unfocusing input field (for arrow navigation)');
-      } else {
-          // If not focused, focus it - find the question input
+          console.log('⌨️ Alt pressed - Unfocusing input field (for arrow navigation)');
+        } else {
           const questionInput = document.querySelector('textarea[placeholder*="question"]') as HTMLElement;
           if (questionInput) {
             questionInput.focus();
-            console.log('⌨️ Shift pressed - Focusing input field');
+            console.log('⌨️ Alt pressed - Focusing input field');
           }
         }
         return;
@@ -925,9 +890,9 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       const hasShift = e.shiftKey;
       const hasAlt = e.altKey;
       
-      for (const [action, config] of Object.entries(shortcuts)) {
+      for (const [action, config] of Object.entries(shortcuts) as [string, ShortcutConfig][]) {
         const mod = config.modifier.toLowerCase();
-        const configKey = config.key.toLowerCase();
+        const configKey = config.defaultKey.toLowerCase();
         
         const modMatch = 
           (mod === 'control' && hasCtrl) ||
@@ -935,7 +900,11 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
           (mod === 'alt' && hasAlt) ||
           (mod === 'shift' && hasShift);
         
-        if (modMatch && pressedKey === configKey && !hasAlt) {
+        const keyMatch = config.defaultKey.trim() === '' 
+          ? (pressedKey === config.modifier.toLowerCase())
+          : (pressedKey === configKey);
+        
+        if (modMatch && keyMatch && (!hasAlt || mod === 'alt')) {
           e.preventDefault();
           console.log(`🎯 Shortcut triggered: ${action}, isGenerating: ${isGeneratingRef.current}`);
           
@@ -1002,22 +971,11 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     setTranscribedText(combined);
   }, [committedText, interimText]);
 
-  // Initialize API key from current provider
-  useEffect(() => {
-    setTempApiKey(apiKeys[apiProvider] || '');
-  }, [apiProvider]);
-
   // Initialize Deepgram key when voice provider changes
   useEffect(() => {
     if (voiceProvider === 'deepgram') {
-      // Populate with saved key (from state or localStorage)
-      const savedKey = deepgramApiKey || (() => {
-        try {
-          const u = JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}');
-          return u?.deepgramApiKey || '';
-        } catch { return ''; }
-      })();
-      setTempDeepgramKey(savedKey);
+      // Deepgram API key is now managed by the system/super admin
+      // No user configuration needed
     }
   }, [voiceProvider]);
 
@@ -1093,18 +1051,9 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
   //  Persist API keys to localStorage for overlay access
   useEffect(() => {
-    localStorage.setItem('isa_api_keys', JSON.stringify(apiKeys));
-    localStorage.setItem('isa_api_provider', apiProvider);
-  }, [apiKeys, apiProvider]);
+  }, [apiProvider]);
 
   // Persistence hooks
-  useEffect(() => {
-    if (showApiSuccess) {
-      const timer = setTimeout(() => setShowApiSuccess(false), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [showApiSuccess]);
-
   useEffect(() => {
     if (showSettingsSaved) {
       const timer = setTimeout(() => setShowSettingsSaved(false), 3000);
@@ -1140,7 +1089,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   };
   
   // Refs for current state values (to avoid stale closures)
-  const apiKeysRef = useRef(apiKeys);
   const apiProviderRef = useRef(apiProvider);
   const isListeningRef = useRef(isListening);
   const manualTextInputRef = useRef(manualTextInput);
@@ -1148,12 +1096,30 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const isGeneratingRef = useRef(isGenerating);
   const triggerGetAnswerRef = useRef(0);
   
-  useEffect(() => { apiKeysRef.current = apiKeys; }, [apiKeys]);
   useEffect(() => { apiProviderRef.current = apiProvider; }, [apiProvider]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
   useEffect(() => { manualTextInputRef.current = manualTextInput; }, [manualTextInput]);
   useEffect(() => { transcribedTextRef.current = transcribedText; }, [transcribedText]);
   useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
+
+  // Cross-platform sync: pick up language/settings changes from overlay window
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === LS_USER_KEY && e.newValue) {
+        try {
+          const updatedUser = JSON.parse(e.newValue);
+          if (updatedUser.deepgramLanguage && updatedUser.deepgramLanguage !== deepgramLanguage) {
+            setDeepgramLanguage(updatedUser.deepgramLanguage);
+          }
+          if (updatedUser.settings?.responseLanguage) {
+            setSettings(prev => ({ ...prev, ...updatedUser.settings }));
+          }
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
   
   // Watch for shortcut trigger - call handleGetAnswer when counter changes
   useEffect(() => {
@@ -1172,9 +1138,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const startListenRef = useRef<(() => void) | null>(null);
   const stopListenRef = useRef<(() => void) | null>(null);
 
-  // Get current API key
-  const apiKey = apiKeys[apiProvider] || '';
-
   useEffect(() => {
     try {
       localStorage.setItem(LS_JD_KEY, jobDescription);
@@ -1186,12 +1149,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       localStorage.setItem(LS_COMPANY_INFO_KEY, companyInfo);
     } catch (e) {}
   }, [companyInfo]);
-
-  //  Persist API keys to localStorage for overlay access
-  useEffect(() => {
-    localStorage.setItem('isa_api_keys', JSON.stringify(apiKeys));
-    localStorage.setItem('isa_api_provider', apiProvider);
-  }, [apiKeys, apiProvider]);
 
   // Initialize Speech Recognition (Web Speech API for browser, Python Bridge for Electron)
   useEffect(() => {
@@ -1206,17 +1163,13 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
       // Initialize voice provider based on user settings
       console.log('🎤 [App] Initializing voice provider...');
-      console.log('🎤 [App] User voice provider:', user.voiceProvider);
-      console.log('🎤 [App] Has Deepgram key:', !!user.deepgramApiKey);
-      
-      const voiceProvider = user.voiceProvider || 'default';
-      const deepgramKey = user.deepgramApiKey || '';
+      console.log('🎤 [App] Voice provider:', voiceProvider);
       
       const dgLang = user.deepgramLanguage || 'multi';
       const dgKeyterms = user.deepgramKeyterms || '';
       ipcRenderer.send('init-voice-provider', {
         voiceProvider,
-        apiKey: deepgramKey,
+        apiKey: user?.deepgramApiKey || '',
         language: dgLang,
         keyterms: dgKeyterms
       });
@@ -1242,10 +1195,10 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
           }
         } else if (message.type === 'error') {
           console.error('🎤 Voice error:', message.message);
-          alert(`Speech recognition error: ${message.message}`);
+          setModalInfo({ title: 'Speech Recognition Error', message: message.message, variant: 'error', icon: '🎤' });
         } else if (message.type === 'fatal') {
           console.error('🎤 Voice fatal error:', message.message);
-          alert(`Fatal error: ${message.message}`);
+          setModalInfo({ title: 'Fatal Error', message: message.message, variant: 'error', icon: '⚠️' });
           setIsListening(false);
         } else if (message.type === 'ready') {
           console.log('✅ Voice bridge ready!');
@@ -1262,13 +1215,12 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       const handleDeepgramError = (_event: any, errorData: any) => {
         console.error('❌ [App] Deepgram error received:', errorData);
         
-        // Show user-friendly alert
-        alert(
-          `⚠️ ${errorData.title}\n\n` +
-          `${errorData.message}\n\n` +
-          `Solutions:\n${errorData.solutions.join('\n')}\n\n` +
-          `${errorData.autoSwitching ? 'Automatically switching to Python (DEFAULT) provider...' : ''}`
-        );
+        setModalInfo({
+          title: errorData.title || 'Deepgram Error',
+          message: `${errorData.message}\n\nSolutions: ${errorData.solutions.join(', ')}${errorData.autoSwitching ? '\n\nAutomatically switching to Python (DEFAULT) provider...' : ''}`,
+          variant: 'error',
+          icon: '⚠️'
+        });
       };
 
       ipcRenderer.on('deepgram-sox-error', handleDeepgramError);
@@ -1401,7 +1353,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
           console.error('Speech error:', e.error);
           if (e.error === 'not-allowed') {
             errorHandled = true;
-            alert('Microphone permission denied');
+            setModalInfo({ title: 'Microphone Error', message: 'Microphone permission denied. Please allow microphone access in your browser settings.', variant: 'error', icon: '🎤' });
             setIsListening(false);
             wantToListenRef.current = false;
           }
@@ -1416,14 +1368,48 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
   // Start Listen
   const handleStartListen = async () => {
+    if (wantToListenRef.current) {
+      console.log('⏭️ [App] handleStartListen skipped - already started');
+      return;
+    }
+    wantToListenRef.current = true;
+
     setTranscribedText('');
     setCommittedText('');
     setInterimText('');
     setManualTextInput('');
     setAiResponse('');
-    wantToListenRef.current = true;
     
-if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
+    // Determine effective voice provider and possible Deepgram config
+    let effectiveVoiceProvider = voiceProvider;
+    let effectiveDeepgramLanguage = deepgramLanguage;
+    let effectiveDeepgramKeyterms = deepgramKeyterms;
+
+    try {
+      const userFromStorage = localStorage.getItem(LS_USER_KEY);
+      const parsedUser = userFromStorage ? JSON.parse(userFromStorage) : user;
+      const sysConfig = await resolveDeepgramConfig(parsedUser);
+      if (sysConfig && sysConfig.apiKey) {
+        appLog('🎤 [App] System Deepgram chain active, overriding voice provider to deepgram for this listen session');
+        effectiveVoiceProvider = 'deepgram';
+        effectiveDeepgramLanguage = sysConfig.language || effectiveDeepgramLanguage;
+        effectiveDeepgramKeyterms = sysConfig.keyterms || effectiveDeepgramKeyterms;
+        // Store for downstream use
+        (window as any).__systemDeepgramLanguage = effectiveDeepgramLanguage;
+        (window as any).__systemDeepgramKeyterms = effectiveDeepgramKeyterms;
+      }
+    } catch (e) {
+      appLog('Failed to check system Deepgram chain:', e);
+    }
+
+    // Determine if Deepgram should be used: explicit voiceProvider OR system chain resolved a key
+    const shouldUseDeepgram = effectiveVoiceProvider === 'deepgram';
+
+    if (isElectronRef.current && shouldUseDeepgram) {
+  // If system chain resolved, use the resolved language/keyterms
+  const effectiveLanguage = (window as any).__systemDeepgramLanguage || deepgramLanguage || 'multi';
+  const effectiveKeyterms = (window as any).__systemDeepgramKeyterms || deepgramKeyterms || '';
+  appLog(`Effective Deepgram mode: language=${effectiveLanguage}, keyterms=${effectiveKeyterms}`);
       try {
         appLog('Start listen: Electron deepgram mixed mode');
         // 1) Capture system audio in Electron (no picker; handled in main session handler)
@@ -1480,7 +1466,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         const mediaRecorder = new MediaRecorder(mixedStream);
         mediaRecorderRef.current = mediaRecorder;
         
-        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
+        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(deepgramLanguage || 'multi')}&keyterms=${encodeURIComponent(deepgramKeyterms || '')}`);
         deepgramWsRef.current = ws;
         
         let deepgramReady = false;
@@ -1551,7 +1537,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
       ipcRendererRef.current?.send('python-start-listen');
       setIsListening(true);
       console.log('🎤 VOICE: Python Bridge (fallback)');
-    } else if (voiceProvider === 'deepgram' && deepgramApiKey) {
+    } else if (shouldUseDeepgram) {
       try {
         // Audio constraints optimized for capturing speaker audio (YouTube, meeting apps)
         // - echoCancellation: false - Don't filter out speaker audio
@@ -1573,7 +1559,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         
-        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?apiKey=${encodeURIComponent(deepgramApiKey)}&language=${encodeURIComponent(deepgramLanguage || 'en-US')}`);
+        const ws = new WebSocket(`${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(deepgramLanguage || 'multi')}&keyterms=${encodeURIComponent(deepgramKeyterms || '')}`);
         deepgramWsRef.current = ws;
         
         let deepgramReady$ = false;
@@ -1669,14 +1655,20 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
       if (isElectronRef.current && (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current)) {
         const currentText = transcribedText.trim();
         setIsListening(false);
-        
-        // Copy transcribed text to manual input so question bar keeps showing it
-        // COMMENTED OUT FOR TESTING
-        // if (currentText) {
-        //   setManualTextInput(currentText);
-        // }
 
+      // Stop MediaRecorder first to prevent any more audio chunks
+      try {
+        if (mediaRecorderRef.current) {
+          mediaRecorderRef.current.ondataavailable = null;
+          mediaRecorderRef.current.onstop = null;
+          if (mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        }
+      } catch (e) {}
+      mediaRecorderRef.current = null;
       
+      // Send CloseStream signal, then close WebSocket
       try {
         if (deepgramWsRef.current && deepgramWsRef.current.readyState === WebSocket.OPEN) {
           deepgramWsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
@@ -1684,13 +1676,6 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         deepgramWsRef.current?.close();
       } catch (e) {}
       deepgramWsRef.current = null;
-      
-      try {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
-        }
-      } catch (e) {}
-      mediaRecorderRef.current = null;
       
       try {
         if (deepgramAudioRef.current) {
@@ -1744,7 +1729,18 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
       const currentText = transcribedText.trim();
       setIsListening(false);
       
-      // Close the WebSocket gracefully
+      // Stop MediaRecorder first to prevent any more audio chunks
+      try {
+        const mr = mediaRecorderRef.current as unknown as MediaRecorder;
+        if (mr && mr.state !== 'inactive') {
+          mr.ondataavailable = null;
+          mr.onstop = null;
+          mr.stop();
+        }
+      } catch (e) {}
+      mediaRecorderRef.current = null;
+      
+      // Send CloseStream signal, then close WebSocket
       try {
         const ws = deepgramWsRef.current as unknown as WebSocket;
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1755,15 +1751,6 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         }
       } catch (e) {}
       deepgramWsRef.current = null;
-      
-      // Stop MediaRecorder
-      try {
-        const mr = mediaRecorderRef.current as unknown as MediaRecorder;
-        if (mr && mr.state !== 'inactive') {
-          mr.stop();
-        }
-      } catch (e) {}
-      mediaRecorderRef.current = null;
       
       // Stop audio stream
       try {
@@ -1802,13 +1789,6 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
     console.log('🤖 Starting summary generation for all fields...');
 
     try {
-      const activeApiKey = apiKeys[apiProvider];
-      if (!activeApiKey) {
-        alert('⚠️ Please configure your API key before generating summaries.');
-        setIsGeneratingSummaries(false);
-      return;
-    }
-
       let cvSummary = settings.cvSummary || '';
       let basePromptSummary = settings.basePromptSummary || '';
       let jobDescriptionSummary = settings.jobDescriptionSummary || '';
@@ -1824,8 +1804,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             body: JSON.stringify({
               type: 'cv',
               text: resume.content,
-              apiProvider,
-              apiKey: activeApiKey
+              apiProvider
             })
           });
           
@@ -1854,8 +1833,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             body: JSON.stringify({
               type: 'basePrompt',
               text: basePrompt,
-              apiProvider,
-              apiKey: activeApiKey
+              apiProvider
             })
           });
           
@@ -1884,8 +1862,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             body: JSON.stringify({
               type: 'jd',
               text: jobDescription,
-              apiProvider,
-              apiKey: activeApiKey
+              apiProvider
             })
           });
           
@@ -1914,8 +1891,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
             body: JSON.stringify({
               type: 'company',
               text: companyInfo,
-              apiProvider,
-              apiKey: activeApiKey
+              apiProvider
             })
           });
           
@@ -2002,7 +1978,6 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
     const currentIsListening = isListeningRef.current;
     const currentManualText = manualTextInputRef.current;
     const currentTranscribed = transcribedTextRef.current;
-    const currentApiKeys = apiKeysRef.current;
     const currentApiProvider = apiProviderRef.current;
     
     const questionToAnswer = (currentIsListening ? currentTranscribed : currentManualText).trim();
@@ -2015,38 +1990,14 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
       }
     }
 
-    // Get the active API key based on selected provider
-    const activeApiKey = currentApiKeys[currentApiProvider];
-    
-    if (!questionToAnswer || !activeApiKey) {
-      if (!activeApiKey) {
-        // Custom message box instead of default alert
-        const messageBox = document.createElement('div');
-        messageBox.innerHTML = `
-          <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-            <div style="background: #1e293b; border: 2px solid #ef4444; border-radius: 16px; padding: 32px; max-width: 400px; box-shadow: 0 20px 60px rgba(239, 68, 68, 0.4);">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                <h3 style="color: #ef4444; font-size: 24px; font-weight: bold; margin-bottom: 8px;">API Key Not Configured</h3>
-              </div>
-              <p style="color: #cbd5e1; font-size: 16px; line-height: 1.6; margin-bottom: 24px; text-align: center;">
-                Please configure your AI provider API key in the <strong style="color: white;">Advanced Settings</strong> section below to start getting answers.
-              </p>
-              <button onclick="this.parentElement.parentElement.remove()" style="width: 100%; background: #ef4444; color: white; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
-                Got It
-              </button>
-            </div>
-          </div>
-        `;
-        document.body.appendChild(messageBox);
-      }
+    if (!questionToAnswer) {
       return;
     }
 
     // ==================== TOKEN CHECK & CONSUMPTION ====================
     // Check if user has enough tokens before generating answer
     // First check locally if user is admin (skip API call for admins)
-    const isLocalAdmin = user.role === 'admin' || user.tokens === -1;
+    const isLocalAdmin = user.role === 'admin' || user.role === 'super-admin' || user.tokens === -1;
     
     if (!isLocalAdmin) {
       try {
@@ -2055,41 +2006,7 @@ if (isElectronRef.current && voiceProvider === 'deepgram' && deepgramApiKey) {
         console.log('🔍 Token check result:', tokenCheck);
         
         if (!tokenCheck.canSendMessage && !tokenCheck.isAdmin && !tokenCheck.hasUnlimitedTokens) {
-          // Show "Out of Tokens" modal
-          const messageBox = document.createElement('div');
-          messageBox.id = 'out-of-tokens-modal';
-          messageBox.innerHTML = `
-            <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-              <div style="background: #1e293b; border: 2px solid #f59e0b; border-radius: 16px; padding: 32px; max-width: 450px; box-shadow: 0 20px 60px rgba(245, 158, 11, 0.4);">
-                <div style="text-align: center; margin-bottom: 24px;">
-                  <div style="font-size: 48px; margin-bottom: 16px;">🪙</div>
-                  <h3 style="color: #f59e0b; font-size: 24px; font-weight: bold; margin-bottom: 8px;">Out of Tokens</h3>
-                </div>
-                <p style="color: #cbd5e1; font-size: 16px; line-height: 1.6; margin-bottom: 24px; text-align: center;">
-                  You've used all <strong style="color: white;">10 free trial tokens</strong> (1 token = 1 question).
-                  <br/><br/>
-                  <strong style="color: #f59e0b;">Upgrade to Pro</strong> to get unlimited tokens and unlock premium features!
-                </p>
-                <button id="view-pricing-btn" style="width: 100%; background: #f59e0b; color: white; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; margin-bottom: 8px;" onmouseover="this.style.background='#d97706'" onmouseout="this.style.background='#f59e0b'">
-                  View Pricing
-                </button>
-                <button id="close-modal-btn" style="width: 100%; background: transparent; color: #94a3b8; padding: 8px; border: 1px solid #475569; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='#64748b'" onmouseout="this.style.borderColor='#475569'">
-                  Close
-                </button>
-              </div>
-            </div>
-          `;
-          document.body.appendChild(messageBox);
-          
-          // Add event listeners
-          document.getElementById('view-pricing-btn')?.addEventListener('click', () => {
-            document.getElementById('out-of-tokens-modal')?.remove();
-            window.location.href = '/pricing';
-          });
-          document.getElementById('close-modal-btn')?.addEventListener('click', () => {
-            document.getElementById('out-of-tokens-modal')?.remove();
-          });
-          
+          setShowOutOfTokensModal(true);
           console.log('❌ Out of tokens! Current:', tokenCheck.tokens);
           return;
         }
@@ -2198,8 +2115,7 @@ Respond in ${langDisplay}.]`;
       console.log('  - Total Prompt:', fullPrompt.length, 'chars');
       console.log('  - Estimated Tokens:', Math.ceil(fullPrompt.length / 4));
       console.log('🤖 Using API provider:', apiProvider);
-      console.log('🔑 Using API key:', activeApiKey ? activeApiKey.substring(0, 10) + '...' : 'None');
-      console.log('📜 Chat history length:', chatHistory.length);
+      console.log(' Chat history length:', chatHistory.length);
       console.log('🎯 Context messages limit:', contextMessages, 'pairs (', contextMessages * 2, 'messages)');
 
       let streamedText = '';
@@ -2212,24 +2128,21 @@ Respond in ${langDisplay}.]`;
       
       console.log('✂️ Using', recentHistory.length, 'messages from history (trimmed from', chatHistory.length, ')');
 
-      // Prepare messages based on provider format
+      // Prepare messages in universal OpenAI format (backend converts for Gemini if needed)
       let apiMessages: any[] = [];
-      
-      if (apiProvider === 'gemini') {
-        // Gemini format
-        apiMessages = recentHistory.map((msg: any) => ({
-          role: msg.role,
-          parts: msg.parts || [{ text: msg.content || '' }]
-        }));
-        apiMessages.push({ role: 'user', parts: [{ text: fullPrompt }] });
-      } else {
-        // OpenAI/Claude/Groq format
-        apiMessages = recentHistory.map((msg: any) => ({
-          role: msg.role === 'model' ? 'assistant' : msg.role,
-          content: msg.parts?.[0]?.text || msg.content || ''
-        }));
-        apiMessages.push({ role: 'user', content: fullPrompt });
+
+      apiMessages = recentHistory.map((msg: any) => ({
+        role: msg.role === 'model' ? 'assistant' : msg.role,
+        content: msg.parts?.[0]?.text || msg.content || ''
+      }));
+
+      // Inject context instruction into the question so the AI sees it right with the prompt
+      let promptWithContext = fullPrompt;
+      if (recentHistory.length > 0) {
+        promptWithContext = `[CONTEXT NOTE]\nThe conversation history above is provided for reference.\n- If the user's new question relates to the previous discussion (follow-up, clarification, deeper dive on same topic), answer IN CONTEXT of that history.\n- If it's a completely new/unrelated topic, answer independently WITHOUT referencing the history.\n\n${fullPrompt}`;
       }
+
+      apiMessages.push({ role: 'user', content: promptWithContext });
 
       // Use streaming endpoint
       console.log('📡 Starting streaming...');
@@ -2239,9 +2152,7 @@ Respond in ${langDisplay}.]`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: apiMessages,
-          apiProvider,
-          apiKey: activeApiKey
+          messages: apiMessages
         }),
         signal: controller.signal
       });
@@ -2276,6 +2187,9 @@ Respond in ${langDisplay}.]`;
               const parsed = JSON.parse(data);
               if (parsed.error) {
                 throw new Error(parsed.error);
+              }
+              if (parsed.provider) {
+                console.log('🔐 System AI chain provider:', parsed.provider, '/', parsed.model);
               }
               if (parsed.text) {
                 streamedText += parsed.text;
@@ -2397,7 +2311,7 @@ Respond in ${langDisplay}.]`;
 
     const newShortcuts = {
       ...shortcuts,
-      [action]: { ...shortcuts[action], modifier, key }
+      [action]: { ...shortcuts[action], modifier, defaultKey: key }
     };
     setShortcuts(newShortcuts);
   };
@@ -2414,6 +2328,15 @@ Respond in ${langDisplay}.]`;
         // Update user in localStorage
         const updatedUser = { ...user, shortcuts };
         localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+
+        // Dispatch event to update user in AppRouter
+        window.dispatchEvent(new CustomEvent('user-shortcuts-updated', { detail: { shortcuts } }));
+
+        // Re-register global shortcuts in Electron main process
+        if (typeof window !== 'undefined' && (window as any).require) {
+          const { ipcRenderer } = (window as any).require('electron');
+          ipcRenderer.invoke('update-global-shortcuts', shortcuts);
+        }
       }
     } catch (error) {
       console.error('Failed to save shortcuts:', error);
@@ -2448,437 +2371,114 @@ Respond in ${langDisplay}.]`;
       <div className="mx-auto max-w-7xl">
         
         {/* Header with Action Buttons */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             {/* Left: Title */}
           <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-2">Interview Stealth Assist</h1>
-              <p className="text-slate-600 dark:text-slate-400 text-xs sm:text-sm">Configure your AI interview assistant</p>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white">Stealth Assist</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">AI interview assistant</p>
             </div>
             
             {/* Right: Stealth + New Session (Electron only) */}
             {isElectron && (
-              <div className="flex items-center gap-2 sm:gap-3">
-                {/* Stealth Window Button */}
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    const { ipcRenderer } = (window as any).require('electron');
-                    ipcRenderer.send('launch-stealth-pip');
-                  }}
-                  className="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap"
+                  onClick={launchStealthPip}
+                  className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
                 >
-                  🎯 Stealth
+                  Open Overlay
                 </button>
-                
-                {/* New Session Button */}
                 <button
                   onClick={handleNewSession}
-                  className="px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap"
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
                 >
-                New Session
+                  New Session
                 </button>
               </div>
             )}
           </div>
           </div>
-          
-        {/* Section 1: API Settings */}
-        <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+
+        {/* Section 1: Voice Assist Configuration */}
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-black dark:text-white uppercase tracking-wide">1. API Configuration</h2>
-            {(apiKeys[apiProvider] && apiKeys[apiProvider].trim() !== '') ? (
-              <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1.5 rounded">
-                ✓ Configured
-              </span>
-            ) : (
-              <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded">
-                ⚠️ Required
-              </span>
-            )}
-            </div>
-            
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Provider Selection */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">Select Provider</label>
-              <select 
-                value={apiProvider}
-                onChange={async (e) => {
-                  const newProvider = e.target.value as 'gemini' | 'openai' | 'claude' | 'groq';
-                  setApiProvider(newProvider);
-                  
-                  try {
-                    const response = await fetch(`${API_BASE_URL}/api/auth/provider`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ userId: user._id, provider: newProvider })
-                    });
-                    
-                    if (response.ok) {
-                      const updatedUser = { ...user, selectedProvider: newProvider };
-                      localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                      localStorage.setItem('isa_api_provider', newProvider);
-                  // notify overlay to refresh instantly
-                  if (typeof window !== 'undefined' && (window as any).require) {
-                    const { ipcRenderer } = (window as any).require('electron');
-                    ipcRenderer.send('notify-overlay-settings-changed');
-                  }
-                    }
-                  } catch (error) {
-                    console.error('Failed to save provider:', error);
-                  }
-                }}
-                className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
+            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Voice Assist</h2>
+            {typeof window !== 'undefined' && (window as any).require && (
+              <button
+                onClick={() => window.location.reload()}
+                title="Refresh data from database"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
               >
-                <option value="gemini">Gemini (Google)</option>
-                <option value="openai">OpenAI (GPT)</option>
-                <option value="claude">Claude (Anthropic)</option>
-                <option value="groq">Groq (Fast)</option>
-              </select>
-            </div>
-            
-            {/* API Key Input */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
-                {apiProvider.toUpperCase()} API Key
-              </label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={tempApiKey}
-                    onChange={(e) => setTempApiKey(e.target.value)}
-                    placeholder={`Enter your ${apiProvider} API key...`}
-                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 pr-10 text-black dark:text-white focus:outline-none focus:border-blue-500"
-                  />
-              <button 
-                    type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
-              >
-                    {showApiKey ? '👁️' : '👁️‍🗨️'}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
               </button>
-                </div>
-              <button 
-                  onClick={async () => {
-                    const updatedKeys = { ...apiKeys, [apiProvider]: tempApiKey };
-                    setApiKeys(updatedKeys);
-                    setShowApiSuccess(true);
-                    setTimeout(() => setShowApiSuccess(false), 3000);
-                    
-                    localStorage.setItem('isa_api_keys', JSON.stringify(updatedKeys));
-                    
-                    try {
-                      const result = await authClient.updateApiKey(user._id, apiProvider, tempApiKey);
-                      if (result.success) {
-                        const updatedUser = { ...user, apiKeys: result.apiKeys || {}, selectedProvider: apiProvider };
-                        localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                      // notify overlay to refresh instantly
-                      if (typeof window !== 'undefined' && (window as any).require) {
-                        const { ipcRenderer } = (window as any).require('electron');
-                        ipcRenderer.send('notify-overlay-settings-changed');
-                      }
-                      }
-                    } catch (error: any) {
-                      console.error('❌ API key save error:', error);
-                    }
-                  }}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold transition-all"
-                >
-                  Save
-              </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Status Messages */}
-          {showApiSuccess && (
-            <div className="mt-4 flex items-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-sm font-bold">✓ {apiProvider.toUpperCase()} API Key Updated Successfully</span>
-            </div>
-          )}
-          {!apiKeys[apiProvider] && !showApiSuccess && (
-            <div className="mt-4 flex items-start gap-3 text-amber-500 bg-amber-500/10 border border-amber-500/20 px-4 py-3 rounded-lg">
-              <span className="text-xl">💡</span>
-              <div className="text-sm">
-                <p className="font-bold mb-1">First-time setup required</p>
-                <p className="text-amber-400/70">Enter your API key to enable AI features</p>
-          </div>
-            </div>
-          )}
-          {(apiKeys[apiProvider]) && !showApiSuccess && (
-            <div className="mt-4 flex items-center gap-2 text-emerald-500">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-sm font-bold">{apiProvider.toUpperCase()} API Key Active</span>
-            </div>
-          )}
-        </div>
-
-        {/* Section 1.5: Voice Assist Configuration */}
-        <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-black dark:text-white uppercase tracking-wide">1.5 Voice Assist Provider</h2>
-            {(voiceProvider === 'deepgram' && deepgramApiKey && deepgramApiKey.trim() !== '') ? (
-              <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1.5 rounded">
-                ✓ Configured
-              </span>
-            ) : (
-              <span className="text-xs font-bold text-blue-500 bg-blue-500/10 px-3 py-1.5 rounded">
-                ℹ Default Active
-              </span>
-            )}
-          </div>
-            
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Voice Provider Selection */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">Select Voice Provider</label>
-              <select 
-                value={voiceProvider}
-                onChange={async (e) => {
-                  const newProvider = e.target.value as 'default' | 'deepgram';
-                  setVoiceProvider(newProvider);
-                  
-                  try {
-                    const response = await fetch(`${API_BASE_URL}/api/auth/voice-provider`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ userId: user._id, voiceProvider: newProvider })
-                    });
-                    
-                    if (response.ok) {
-                      const updatedUser = { ...user, voiceProvider: newProvider };
-                      localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                      
-                      console.log('🎤 [App] Voice provider changed to:', newProvider);
-                      
-                      // Re-initialize voice provider in Electron
-                      if (typeof window !== 'undefined' && (window as any).require) {
-                        const { ipcRenderer } = (window as any).require('electron');
-                        
-                        // Initialize the new provider
-                        ipcRenderer.send('init-voice-provider', {
-                          voiceProvider: newProvider,
-                          apiKey: newProvider === 'deepgram' ? deepgramApiKey : '',
-                          language: deepgramLanguage,
-                          keyterms: deepgramKeyterms
-                        });
-                        console.log('✅ [App] Voice provider re-initialized');
-                        
-                        // Notify overlay to refresh
-                        ipcRenderer.send('notify-overlay-settings-changed');
-                      }
-                    }
-                  } catch (error) {
-                    console.error('Failed to save voice provider:', error);
-                  }
-                }}
-                className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
-              >
-                <option value="default">DEFAULT (Google speech)</option>
-                <option value="deepgram">Deepgram API</option>
-              </select>
-            </div>
-
-            {/* Optimized Audio Capture (always on - captures speaker audio) */}
-            {/* <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-purple-700 dark:text-purple-400">Speaker Audio Capture</h4>
-                  <p className="text-xs text-purple-600 dark:text-purple-500 mt-1">
-                    Optimized for YouTube, Zoom, Meet, Teams - speak loudly for best results
-                  </p>
-                </div>
-                <span className="text-xs font-bold text-purple-600 bg-purple-500/20 px-2 py-1 rounded">AUTO</span>
-              </div>
-            </div> */}
-            
-            {/* Deepgram API Key Input (only shown when deepgram is selected) */}
-            {voiceProvider === 'deepgram' && (
-              <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
-                  Deepgram API Key
-                </label>
-
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={showDeepgramKey ? 'text' : 'password'}
-                      value={tempDeepgramKey}
-                      onChange={(e) => setTempDeepgramKey(e.target.value)}
-                      placeholder="Enter Deepgram API key"
-                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 pr-12 text-black dark:text-white focus:outline-none focus:border-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowDeepgramKey(!showDeepgramKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
-                    >
-                      {showDeepgramKey ? '👁️' : '👁️‍🗨️'}
-                    </button>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      if (!tempDeepgramKey.trim()) return;
-                      
-                      try {
-                        const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-key`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ userId: user._id, deepgramApiKey: tempDeepgramKey })
-                        });
-                        
-                        if (response.ok) {
-                          const result = await response.json();
-                          setDeepgramApiKey(tempDeepgramKey);
-                          setShowVoiceSuccess(true);
-                          setTimeout(() => setShowVoiceSuccess(false), 3000);
-                          
-                          const updatedUser = { ...user, deepgramApiKey: tempDeepgramKey, deepgramLanguage: deepgramLanguage || 'multi' };
-                          localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                          
-                          // Also save language to DB (default 'multi' if not set yet)
-                          try {
-                            await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ userId: user._id, deepgramLanguage: deepgramLanguage || 'multi' })
-                            });
-                            console.log('🌍 [App] Language auto-saved to DB:', deepgramLanguage || 'multi');
-                          } catch (e) {
-                            console.error('Failed to auto-save language:', e);
-                          }
-                          
-                          console.log('🎤 [App] Deepgram API key saved');
-                          
-                          // Re-initialize voice provider with new key
-                          if (typeof window !== 'undefined' && (window as any).require) {
-                            const { ipcRenderer } = (window as any).require('electron');
-                            
-                            // If currently using Deepgram, reinitialize with new key
-                            if (voiceProvider === 'deepgram') {
-                              ipcRenderer.send('init-voice-provider', {
-                                voiceProvider: 'deepgram',
-                                apiKey: tempDeepgramKey,
-                                language: deepgramLanguage,
-                                keyterms: deepgramKeyterms
-                              });
-                              console.log('✅ [App] Deepgram re-initialized with new key');
-                            }
-                            
-                            // Notify overlay to refresh
-                            ipcRenderer.send('notify-overlay-settings-changed');
-                          }
-                        }
-                      } catch (error: any) {
-                        console.error('❌ Deepgram key save error:', error);
-                      }
-                    }}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold transition-all"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
             )}
           </div>
 
-          {/* Language Selection (only shown when deepgram is selected) */}
-          {voiceProvider === 'deepgram' && (
-            <div className="mt-6">
-              <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
-                Transcription Language
-              </label>
-              <select
-                value={deepgramLanguage}
-                onChange={async (e) => {
-                  const newLang = e.target.value;
-                  setDeepgramLanguage(newLang);
-                  
-                  try {
-                    // Save to backend
-                    console.log('🌍 [App] Saving language to backend:', newLang, 'userId:', user._id);
-                    const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ userId: user._id, deepgramLanguage: newLang })
-                    });
-                    
-                    const result = await response.json();
-                    console.log('🌍 [App] Language save response:', response.status, result);
-                    
-                    if (response.ok) {
-                      const updatedUser = { ...user, deepgramLanguage: newLang };
-                      localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                      console.log('🌍 [App] Deepgram language saved to DB:', newLang);
-                      
-                      // Re-initialize voice provider in Electron with new language
-                      if (typeof window !== 'undefined' && (window as any).require) {
-                        const { ipcRenderer } = (window as any).require('electron');
-                        ipcRenderer.send('init-voice-provider', {
-                          voiceProvider: 'deepgram',
-                          apiKey: deepgramApiKey,
-                          language: newLang,
-                          keyterms: deepgramKeyterms
-                        });
-                        ipcRenderer.send('notify-overlay-settings-changed');
-                      }
-                    }
-                  } catch (error) {
-                    console.error('Failed to save language:', error);
+          {/* Language Selection (always visible) */}
+          <div className="mt-6">
+            <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
+              Transcription Language
+            </label>
+            <SearchableLanguageSelect
+              value={deepgramLanguage}
+              onChange={async (val) => {
+                setDeepgramLanguage(val);
+                // Save immediately and restart voice if listening
+                try {
+                  const langRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user._id, deepgramLanguage: val })
+                  });
+                  if (langRes.ok) {
+                    let updatedUser = { ...user, deepgramLanguage: val };
+                    localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                   }
-                }}
-                className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
-              >
-                {DEEPGRAM_LANGUAGES.map(lang => (
-                  <option key={lang.code} value={lang.code}>{lang.label}</option>
-                ))}
-              </select>
+                } catch (_) {}
+                // Restart voice if currently listening
+                if (isListeningRef.current) {
+                  if (stopListenRef.current) stopListenRef.current();
+                  setTimeout(() => {
+                    if (startListenRef.current) startListenRef.current();
+                  }, 500);
+                }
+              }}
+              placeholder="Search language..."
+              options={DEEPGRAM_LANGUAGES}
+              selectOnly
+            />
               <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
                 {ENGLISH_LANG_CODES.includes(deepgramLanguage) 
                   ? '✓ Full features enabled (smart format, punctuation, diarization, dictation)'
                   : 'ℹ Basic features (some advanced features not available for this language)'}
               </p>
             </div>
-          )}
 
           {/* Response Language */}
           <div className="mt-6">
             <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
               Response Language
             </label>
-            <input
-              type="text"
+            <SearchableLanguageSelect
               value={settings.responseLanguage || ''}
-              onChange={(e) => {
-                setSettings(prev => ({ ...prev, responseLanguage: e.target.value }));
-              }}
-              onBlur={(e) => {
-                const newLang = e.target.value;
-                setSettings(prev => ({ ...prev, responseLanguage: newLang }));
-                fetch(`${API_BASE_URL}/api/auth/settings`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: newLang } })
-                }).then(response => response.json()).then(result => {
-                  if (result.success) {
-                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: newLang } };
+              onChange={(val) => setSettings(prev => ({ ...prev, responseLanguage: val }))}
+              onBlur={async (val) => {
+                try {
+                  const res = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: val } })
+                  });
+                  if (res.ok) {
+                    let updatedUser = { ...user, settings: { ...user.settings, responseLanguage: val } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                    localStorage.setItem('isa_response_language', newLang);
-                    // Notify overlay to refresh settings
-                    if (typeof window !== 'undefined' && (window as any).require) {
-                      const { ipcRenderer } = (window as any).require('electron');
-                      ipcRenderer.send('notify-overlay-settings-changed');
-                    }
+                    localStorage.setItem('isa_response_language', val);
                   }
-                }).catch(err => console.error('Failed to save response language:', err));
+                } catch (_) {}
               }}
-              className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
+              placeholder="Search language..."
             />
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
               Enter the language for AI responses (e.g. English, Spanish)
@@ -2896,104 +2496,97 @@ Respond in ${langDisplay}.]`;
                 value={deepgramKeyterms}
                 onChange={(e) => setDeepgramKeyterms(e.target.value)}
                 placeholder="django, fastapi, restful api, kubernetes, react"
-                className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-black dark:text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all"
               />
               <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
-                🔑 Add comma-separated technical terms, names, or jargon for better recognition and responsse.
+                Add comma-separated technical terms, names, or jargon for better recognition.
               </p>
-              <button
-                onClick={async () => {
-                  try {
-                    console.log('🔑 [App] Saving keyterms to backend:', deepgramKeyterms, 'userId:', user._id);
-                    const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ userId: user._id, deepgramKeyterms: deepgramKeyterms })
-                    });
-                    
-                    const result = await response.json();
-                    console.log('🔑 [App] Keyterms save response:', response.status, result);
-                    
-                    if (response.ok) {
-                      const updatedUser = { ...user, deepgramKeyterms: deepgramKeyterms };
-                      localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                      console.log('🔑 [App] Deepgram keyterms saved to DB');
-                      
-                      // Re-initialize voice provider with new keyterms in Electron (only for deepgram)
-                      if (voiceProvider === 'deepgram' && typeof window !== 'undefined' && (window as any).require) {
-                        const { ipcRenderer } = (window as any).require('electron');
-                        ipcRenderer.send('init-voice-provider', {
-                          voiceProvider: 'deepgram',
-                          apiKey: deepgramApiKey,
-                          language: deepgramLanguage,
-                          keyterms: deepgramKeyterms
-                        });
-                        console.log('✅ [App] Voice provider re-initialized with new keyterms');
-                        
-                        // Notify overlay to refresh settings
-                        ipcRenderer.send('notify-overlay-settings-changed');
-                      }
-                      
-                      // Show success message briefly
-                      setShowVoiceSuccess(true);
-                      setTimeout(() => setShowVoiceSuccess(false), 3000);
-                    } else {
-                      console.error('Failed to save keyterms:', result);
-                    }
-                  } catch (error) {
-                    console.error('Failed to save keyterms:', error);
-                  }
-                }}
-                className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition-colors"
-              >
-                Save Keywords
-              </button>
             </div>
           )}
 
-          {/* Status Messages */}
-          {showVoiceSuccess && (
-            <div className="mt-4 flex items-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-sm font-bold">✓ Settings Updated Successfully</span>
-            </div>
-          )}
-          {voiceProvider === 'deepgram' && (!deepgramApiKey || !deepgramApiKey.trim()) && !showVoiceSuccess && (
-            <div className="mt-4 flex items-start gap-3 text-amber-500 bg-amber-500/10 border border-amber-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <div>
-                <p className="text-sm font-bold">Deepgram API Key Required</p>
-                <p className="text-xs mt-1">Get your API key from: <a href="https://console.deepgram.com/" target="_blank" rel="noopener noreferrer" className="underline">console.deepgram.com</a></p>
+          {/* Single Save Button */}
+          <div className="mt-8 flex items-center gap-4">
+            <button
+              onClick={async () => {
+                try {
+                  // Save transcription language
+                  const langRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user._id, deepgramLanguage })
+                  });
+                  const langResult = await langRes.json();
+                  if (langRes.ok) {
+                    let updatedUser = { ...user, deepgramLanguage };
+                    localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                  }
+
+                  // Save response language
+                  const settingsRes = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: settings.responseLanguage } })
+                  });
+                  const settingsResult = await settingsRes.json();
+                  if (settingsResult.success) {
+                    let updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
+                    localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                    localStorage.setItem('isa_response_language', settings.responseLanguage);
+                  }
+
+                  // Save keywords
+                  const keyRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user._id, deepgramKeyterms })
+                  });
+                  const keyResult = await keyRes.json();
+                  if (keyRes.ok) {
+                    let updatedUser = { ...user, deepgramKeyterms };
+                    localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                  }
+
+                  // Notify overlay and reinit voice provider
+                  if (typeof window !== 'undefined' && (window as any).require) {
+                    const { ipcRenderer } = (window as any).require('electron');
+                    ipcRenderer.send('init-voice-provider', { voiceProvider, apiKey: user?.deepgramApiKey || '', language: deepgramLanguage, keyterms: deepgramKeyterms });
+                    ipcRenderer.send('notify-overlay-settings-changed');
+                  } else if (isListeningRef.current) {
+                    // Vite/web: restart voice with new settings
+                    if (stopListenRef.current) stopListenRef.current();
+                    setTimeout(() => {
+                      if (startListenRef.current) startListenRef.current();
+                    }, 500);
+                  }
+
+                  setShowVoiceSuccess(true);
+                  setTimeout(() => setShowVoiceSuccess(false), 3000);
+                } catch (error) {
+                  console.error('Failed to save audio settings:', error);
+                }
+              }}
+              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white text-sm font-bold rounded-xl transition-all shadow-md hover:shadow-lg"
+            >
+              Save Audio Settings
+            </button>
+
+            {/* Status Messages */}
+            {showVoiceSuccess && (
+              <div className="flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Audio Settings Saved
               </div>
-            </div>
-          )}
-          {voiceProvider === 'deepgram' && deepgramApiKey && deepgramApiKey.trim() && !showVoiceSuccess && (
-            <div className="mt-4 flex items-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm font-bold">Deepgram API Active</span>
-            </div>
-          )}
-          {voiceProvider === 'default' && (
-            <div className="mt-4 flex items-center gap-2 text-blue-500 bg-blue-500/10 border border-blue-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm font-bold">Using Default Voice Recognition (Google Speech)</span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Section 2: Interview Context (2-Column Layout) */}
-        <div className="mb-8">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-black dark:text-white uppercase tracking-wide mb-2">2. Interview Context</h2>
-            <p className="text-slate-600 dark:text-slate-400 text-sm">Provide information for personalized AI responses</p>
+            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Interview Context</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-500">Provide information for personalized AI responses</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -3159,68 +2752,62 @@ Respond in ${langDisplay}.]`;
           </div>
 
           {/* Generate Summaries Button + Manual Save */}
-          <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 space-y-3">
+          <div className="mt-6 bg-slate-50/80 dark:bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700/50 p-5 space-y-3">
                   <button 
               onClick={handleGenerateSummaries}
-              disabled={isGeneratingSummaries || !apiKeys[apiProvider]}
-              className={`w-full px-6 py-4 rounded-lg font-bold text-lg transition-all ${
+              disabled={isGeneratingSummaries}
+              className={`w-full px-6 py-3.5 rounded-xl font-bold text-sm transition-all duration-200 ${
                 isGeneratingSummaries 
-                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-purple-500/50'
+                  ? 'bg-slate-300 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30'
               }`}
             >
               {isGeneratingSummaries ? (
-                <span className="flex items-center justify-center gap-3">
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                <span className="flex items-center justify-center gap-2.5">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                   Summarizing...
                 </span>
               ) : (
-                '🤖 Summarize & Store'
+                'Generate AI Summaries'
               )}
                   </button>
             
             {showSettingsSaved && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center justify-center gap-2 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                <span className="text-sm font-bold">✓ Summaries Generated & Saved Successfully!</span>
-                </div>
-            )}
-            
-            {!apiKeys[apiProvider] && (
-              <p className="mt-4 text-center text-sm text-amber-500">
-                ⚠️ Please configure your API key above before generating summaries
-              </p>
+                Summaries Generated & Saved
+              </div>
             )}
 
-            <div className="pt-2 text-center">
+            <div className="pt-1">
                   <button 
                 onClick={handleSaveManualSummaries}
-                className="w-full px-6 py-3 rounded-lg font-bold text-sm transition-all bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-black dark:text-white border border-slate-300 dark:border-slate-700"
+                className="w-full px-6 py-3 rounded-xl font-bold text-sm transition-all duration-200 bg-white dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500/50"
                   >
-                💾 Save Edited Summaries
+                Save Edited Summaries
                   </button>
               {showManualSummarySaved && (
-                <div className="mt-2 text-emerald-400 text-xs font-bold">✓ Summaries saved</div>
+                <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Summaries saved</div>
               )}
                 </div>
               </div>
             </div>
 
         {/* Section 3: Context Messages */}
-        <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-black dark:text-white uppercase tracking-wide mb-2">3. Context Configuration</h2>
-            <p className="text-slate-600 dark:text-slate-400 text-sm">Control how much conversation history the AI receives</p>
+            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Context Configuration</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-500">Control how much conversation history the AI receives</p>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center gap-6">
-              <label className="text-sm font-bold text-slate-700 dark:text-slate-400">Q&A Pairs to Send:</label>
+            <div className="flex items-center gap-4">
+              <label className="text-sm font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">Q&A Pairs:</label>
               <input
                 type="number"
                 min="1"
@@ -3230,47 +2817,31 @@ Respond in ${langDisplay}.]`;
                   const val = parseInt(e.target.value) || 10;
                   setContextMessages(Math.max(1, Math.min(50, val)));
                 }}
-                className="w-24 px-4 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-black dark:text-white text-center focus:border-blue-500 focus:outline-none"
+                className="w-20 px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-black dark:text-white text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
               />
-              <span className="text-sm text-slate-500">
-                (= {contextMessages * 2} messages total)
-              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-500">(= {contextMessages * 2} messages total)</span>
                 </div>
 
-            <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="p-4 bg-blue-50/50 dark:bg-blue-500/5 rounded-xl border border-blue-100 dark:border-blue-500/10">
               <p className="text-xs text-slate-600 dark:text-slate-400">
-                <strong className="text-slate-800 dark:text-slate-300">💡 Recommended:</strong> 5-10 for quick interviews, 15-20 for deep technical discussions
+                <strong>Recommended:</strong> 5-10 for quick interviews, 15-20 for deep technical discussions
               </p>
-              <p className="text-xs text-slate-500 mt-2">
-                Lower = Faster & cheaper responses | Higher = More context & continuity
+              <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
+                Lower = Faster responses &bull; Higher = More context & continuity
               </p>
             </div>
             
             <button
               onClick={async () => {
                 try {
-                  const updatedSettings = {
-                    ...settings,
-                    contextMessages
-                  };
-                  
+                  const updatedSettings = { ...settings, contextMessages };
                   console.log('💾 Saving context messages:', contextMessages);
                   const result = await authClient.updateSettings(user._id, updatedSettings);
-                  
                   if (result && result.success) {
                     console.log('✅ Context settings saved to DB');
-                    
-                    // Update local state
                     setSettings(updatedSettings);
-                    
-                    // Update user in localStorage
-                    const updatedUser = { 
-                      ...user, 
-                      settings: { ...user.settings, contextMessages } 
-                    };
+                    const updatedUser = { ...user, settings: { ...user.settings, contextMessages } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-                    
-                    // Show success message
                     setShowContextSaved(true);
                     setTimeout(() => setShowContextSaved(false), 3000);
                   } else {
@@ -3278,24 +2849,20 @@ Respond in ${langDisplay}.]`;
                   }
                 } catch (error: any) {
                   console.error('❌ Context save error:', error);
-                  setApiError({
-                    title: 'Save Failed',
-                    message: error.message || 'Failed to save context settings',
-                    details: 'Please try again'
-                  });
+                  setApiError({ title: 'Save Failed', message: error.message || 'Failed to save context settings', details: 'Please try again' });
                 }
               }}
-              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold transition-all"
+              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white rounded-xl font-bold text-sm transition-all shadow-md hover:shadow-lg"
             >
-              💾 Save Context Settings
+              Save Context Settings
                   </button>
 
             {showContextSaved && (
-              <div className="flex items-center justify-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center justify-center gap-2 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                <span className="text-sm font-bold">✓ Context Settings Saved!</span>
+                Context Settings Saved
                   </div>
             )}
                 </div>
@@ -3303,28 +2870,30 @@ Respond in ${langDisplay}.]`;
 
         {/* Section 4: Shortcuts (Electron Only) */}
         {isElectron && (
-        <div className="mb-8 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
           <div className="flex items-center justify-between mb-6">
                   <div>
-              <h2 className="text-xl font-bold text-white uppercase tracking-wide mb-2">4. Keyboard Shortcuts</h2>
-              <p className="text-slate-600 dark:text-slate-400 text-sm">Customize shortcuts • Detected OS: <strong className="text-blue-600 dark:text-blue-400">{detectOS().toUpperCase()}</strong></p>
+              <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Keyboard Shortcuts</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-500">OS: <strong className="text-blue-600 dark:text-blue-400">{detectOS().toUpperCase()}</strong></p>
                       </div>
                   <button 
               onClick={handleResetShortcuts}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded-lg transition-all"
+              className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold rounded-xl transition-all"
                   >
-              Reset to Defaults
+              Reset Defaults
                   </button>
                     </div>
                 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {Object.entries(shortcuts).map(([action, config]: [string, any]) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Object.entries(shortcuts)
+              .filter(([action]) => ['toggleOverlay', 'toggleListen', 'analyzeScreen', 'getAnswer', 'focusInput', 'toggleBrowseAI', 'clearQuestion'].includes(action))
+              .map(([action, config]: [string, any]) => (
               <ShortcutRecorder
                 key={action}
                 label={config.label}
                 modifier={config.modifier}
-                currentKey={config.key}
-                onModifierChange={(mod) => handleShortcutChange(action, mod, config.key)}
+                currentKey={config.defaultKey}
+                onModifierChange={(mod) => handleShortcutChange(action, mod, config.defaultKey)}
                 onKeyChange={(key) => handleShortcutChange(action, config.modifier, key)}
                 error={shortcutErrors[action]}
               />
@@ -3332,23 +2901,23 @@ Respond in ${langDisplay}.]`;
           </div>
 
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              💡 <strong>Tip:</strong> Click "Record" or click the key field to record a new shortcut
+            <p className="text-xs text-slate-500 dark:text-slate-500">
+              Tip: Click a key field to record a new shortcut
             </p>
                   <button 
               onClick={handleSaveShortcuts}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all"
+              className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg text-sm"
                   >
-              💾 Save Shortcuts
+              Save Shortcuts
                   </button>
                        </div>
 
           {showShortcutsSuccess && (
-            <div className="mt-4 flex items-center justify-center gap-2 text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-lg">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="mt-4 flex items-center justify-center gap-2 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              <span className="text-sm font-bold">✓ Shortcuts Saved Successfully!</span>
+              Shortcuts Saved
                     </div>
                   )}
                 </div>
@@ -3356,31 +2925,43 @@ Respond in ${langDisplay}.]`;
 
         {/* Footer */}
         <footer className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 text-center">
-          <p className="text-sm text-slate-600 dark:text-slate-500 uppercase tracking-widest">Interview Stealth Assist • Ready for Action</p>
+          <p className="text-sm text-slate-600 dark:text-slate-500 uppercase tracking-widest">Stealth Assist • Ready for Action</p>
         </footer>
             </div>
             
-      {/* Right Column: Live Transcription & Response */}
-      <div className="space-y-6">
+      {/* Live Transcription & Response */}
+      <div className="space-y-4">
             {/* Transcription Box */}
-            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wide">Live Transcription</h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Ask a Question</h3>
                   {isListening && (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                      <span className="text-xs text-red-500 dark:text-red-400">Listening</span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 border border-red-500/20 rounded-full">
+                      <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
+                      <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">REC</span>
+                    </div>
+                  )}
                 </div>
-              )}
+                <div className="flex items-center gap-2">
                   <button 
                     onClick={handleStopResponse}
                     disabled={!isGenerating}
-                    className={`text-xs font-bold ${isGenerating ? 'text-amber-500 dark:text-amber-400 hover:text-amber-600 dark:hover:text-amber-300' : 'text-slate-400 dark:text-slate-700'} transition-colors`}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 ${
+                      isGenerating 
+                        ? 'bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20' 
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-700'
+                    }`}
                   >
                     Stop
+                    {isGenerating && shortcuts?.stopGeneration && <span className="ml-1 opacity-60">{formatShortcut(shortcuts.stopGeneration)}</span>}
                   </button>
-                  <button onClick={handleClear} className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white">Clear</button>
+                  <button 
+                    onClick={handleClear} 
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-white"
+                  >
+                    Clear
+                  </button>
                 </div>
             </div>
             
@@ -3417,23 +2998,24 @@ Respond in ${langDisplay}.]`;
                     }
                   }}
                   rows={1}
-                  className={`w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] ${
-                    isListening ? 'opacity-90' : ''
+                  className={`flex-1 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-all ${
+                    isListening ? 'ring-2 ring-red-500/30' : ''
                   }`}
                   style={{ lineHeight: '1.5' }}
                 />
 
-                <div className="flex flex-col sm:flex-col gap-2">
+                <div className="flex flex-row sm:flex-col gap-2">
                   <button 
                     onClick={isListening ? handleStopListen : handleStartListen}
                     disabled={isGenerating}
-                    className={`px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+                    className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all duration-200 shadow-sm ${
                       isListening
-                        ? 'bg-red-600 hover:bg-red-700 text-white'
-                        : 'bg-green-600 hover:bg-green-700 text-white'
-                    } ${isGenerating ? 'opacity-50' : ''}`}
+                        ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-500/20'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20'
+                    } ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
                   >
-                    {isListening ? 'Stop Listen' : 'Start Listen'}
+                    <span>{isListening ? 'Stop' : 'Listen'}</span>
+                    {shortcuts?.toggleListen && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.toggleListen)}</span>}
                   </button>
                 
                   <button 
@@ -3444,23 +3026,24 @@ Respond in ${langDisplay}.]`;
                       handleGetAnswer();
                     }}
                     disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-                    className={`px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap transition-all bg-blue-600 hover:bg-blue-700 text-white ${
+                    className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all duration-200 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white shadow-md hover:shadow-lg ${
                       isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
-                        ? 'opacity-50'
+                        ? 'opacity-50 cursor-not-allowed'
                         : ''
                     }`}
                   >
-                    {isGenerating ? 'Generating...' : 'Get Answer'}
+                    <span>{isGenerating ? 'Generating...' : 'Get Answer'}</span>
+                    {!isGenerating && shortcuts?.getAnswer && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.getAnswer)}</span>}
                   </button>
                 </div>
               </div>
                 </div>
 
             {/* AI Response */}
-            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 min-h-[300px]">
+            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-5 min-h-[250px]">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-green-600 dark:text-green-400 uppercase tracking-wide">
-                  {qaPairs.length > 0 ? `Q&A History (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Answer'}
+                <h3 className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                  {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Response'}
                 </h3>
                 
                 {/* Navigation Arrows */}
@@ -3469,10 +3052,10 @@ Respond in ${langDisplay}.]`;
                   <button 
                       onClick={() => setCurrentPairIndex(Math.max(0, currentPairIndex - 1))}
                       disabled={currentPairIndex === 0}
-                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${
                         currentPairIndex === 0
-                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md'
                       }`}
                       title="Previous Q&A"
                     >
@@ -3495,11 +3078,10 @@ Respond in ${langDisplay}.]`;
           </div>
 
               {isGenerating && aiResponse ? (
-                /* Show streaming response in real-time */
                 <div className="space-y-4">
-                  <div className="bg-slate-100 dark:bg-slate-800/50 border border-blue-200 dark:border-blue-900/30 rounded-lg p-4">
-                    <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-2">
-                      <div className="w-3 h-3 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="bg-slate-50 dark:bg-slate-800/30 border border-blue-200 dark:border-blue-900/30 rounded-xl p-5">
+                    <div className="flex items-center gap-2 text-[11px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-3">
+                      <div className="w-2.5 h-2.5 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full animate-spin"></div>
                       Generating...
                     </div>
                     <div className="markdown-content text-black dark:text-white text-sm leading-relaxed">
@@ -3529,23 +3111,22 @@ Respond in ${langDisplay}.]`;
                   </div>
                 </div>
               ) : isGenerating ? (
-                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
-                  <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                  Generating response...
+                <div className="flex items-center gap-3 py-8 justify-center text-slate-500 dark:text-slate-500">
+                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-sm font-semibold">Generating response...</span>
                 </div>
               ) : qaPairs.length > 0 && qaPairs[currentPairIndex] ? (
                 <div className="space-y-4">
-                  {/* Question Card */}
-                  <div className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
-                    <div className="text-xs text-slate-600 dark:text-slate-500 uppercase tracking-wide mb-2">Question</div>
-                    <div className="text-black dark:text-white font-bold text-base leading-relaxed">
+                  <div className="bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700 rounded-xl p-5">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-500 font-bold uppercase tracking-wider mb-2">Question</div>
+                    <div className="text-black dark:text-white font-semibold text-sm leading-relaxed">
                       {qaPairs[currentPairIndex].question}
                 </div>
             </div>
             
                   {/* Answer Card */}
-                  <div className="bg-slate-100 dark:bg-slate-800/50 border border-green-200 dark:border-green-900/30 rounded-lg p-4">
-                    <div className="text-xs text-green-600 dark:text-green-500 uppercase tracking-wide mb-2">Answer</div>
+                  <div className="bg-slate-50 dark:bg-slate-800/30 border border-emerald-200 dark:border-emerald-900/30 rounded-xl p-5">
+                    <div className="text-[11px] text-emerald-600 dark:text-emerald-500 font-bold uppercase tracking-wider mb-2">Answer</div>
                     <div className="markdown-content text-black dark:text-white text-sm leading-relaxed">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
@@ -3573,7 +3154,7 @@ Respond in ${langDisplay}.]`;
             </div>
                   </div>
               ) : aiResponse ? (
-                <div className="markdown-content text-black dark:text-white text-sm leading-relaxed">
+                <div className="bg-slate-50 dark:bg-slate-800/30 rounded-xl p-5 markdown-content text-black dark:text-white text-sm leading-relaxed">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
                     rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
@@ -3598,13 +3179,15 @@ Respond in ${langDisplay}.]`;
                   </ReactMarkdown>
                 </div>
               ) : (
-                <p className="text-slate-600 dark:text-slate-500 text-sm italic">AI response will appear here...</p>
+                <div className="flex items-center justify-center py-12 text-slate-400 dark:text-slate-600">
+                  <div className="text-center">
+                    <div className="text-3xl mb-3">💬</div>
+                    <p className="text-sm font-medium">AI response will appear here</p>
+                    <p className="text-xs mt-1">Type a question and click Get Answer</p>
+                  </div>
+                </div>
               )}
                       </div>
-        {/* Footer */}
-        <footer className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 text-center">
-          <p className="text-sm text-slate-600 dark:text-slate-500 uppercase tracking-widest">Interview Stealth Assist • Ready for Action</p>
-        </footer>
       </div>
             
       {/* API Error Modal */}
@@ -3643,6 +3226,45 @@ Respond in ${langDisplay}.]`;
           </div>
         </div>
       )}
+
+      {/* Out of Tokens Modal */}
+      <StealthModal
+        isOpen={showOutOfTokensModal}
+        onClose={() => setShowOutOfTokensModal(false)}
+        title="Out of Tokens"
+        icon="🪙"
+        variant="warning"
+        primaryAction={{
+          label: 'View Pricing',
+          onClick: () => {
+            setShowOutOfTokensModal(false);
+            window.location.hash = '#/pricing';
+          }
+        }}
+        secondaryAction={{
+          label: 'Close',
+          onClick: () => setShowOutOfTokensModal(false)
+        }}
+      >
+        You've used all <strong className="text-white">10 free tokens</strong> (1 token = 1 question).
+        <br /><br />
+        <strong className="text-amber-400">Upgrade to Pro</strong> to get unlimited tokens and unlock premium features!
+      </StealthModal>
+
+      {/* Generic Alert Modal */}
+      <StealthModal
+        isOpen={!!modalInfo}
+        onClose={() => setModalInfo(null)}
+        title={modalInfo?.title || ''}
+        icon={modalInfo?.icon}
+        variant={modalInfo?.variant || 'info'}
+        primaryAction={{
+          label: 'OK',
+          onClick: () => setModalInfo(null)
+        }}
+      >
+        {modalInfo?.message}
+      </StealthModal>
     </div>
   );
 };

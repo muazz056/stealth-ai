@@ -447,9 +447,10 @@ async function registerUser(userData) {
     });
 
     if (existingUser) {
+      const field = existingUser.username === userData.username ? 'Username' : 'Email';
       return {
         success: false,
-        message: 'Username or email already exists'
+        message: field + ' already exists'
       };
     }
 
@@ -510,6 +511,11 @@ QUESTION CLASSIFICATION:
       emailVerificationToken: verificationToken,
       emailVerificationExpiry: tokenExpiry,
       createdAt: new Date(),
+      role: 'user',
+      plan: 'Free',
+      tokens: 10,
+      deepgramLanguage: 'multi',
+      deepgramKeyterms: '',
       apiKeys: {},
       selectedProvider: '', // No default provider - user must choose
       settings: {
@@ -518,6 +524,16 @@ QUESTION CLASSIFICATION:
         jobDescription: '',
         companyInfo: '',
         contextMessages: 5 // Default: send last 5 Q&A pairs (10 messages)
+      },
+      shortcuts: {
+        toggleListen: { modifier: 'Control', key: '\\' },
+        analyzeScreen: { modifier: 'Control', key: ']' },
+        toggleOverlay: { modifier: 'Control', key: '\'' },
+        getAnswer: { modifier: 'Control', key: 'Enter' },
+        focusInput: { modifier: 'Alt', key: '' },
+        clearQuestion: { modifier: 'Control', key: 'Backspace' },
+        stopOrClear: { modifier: 'Control', key: 'Backspace' },
+        toggleBrowseAI: { modifier: 'Control', key: '[' }
       }
     };
 
@@ -710,6 +726,22 @@ async function loginUser(username, password) {
     }
     console.log('🆔 User ID string:', userIdStr);
     
+    // Migrate old shortcut names to new names
+    let migratedShortcuts = user.shortcuts || {};
+    if (migratedShortcuts && typeof migratedShortcuts === 'object') {
+      const renameMap = {
+        startStopListen: 'toggleListen',
+        minimizeToggle: 'toggleOverlay',
+        focusQuestion: 'focusInput'
+      };
+      for (const [oldName, newName] of Object.entries(renameMap)) {
+        if (migratedShortcuts[oldName]) {
+          migratedShortcuts[newName] = migratedShortcuts[oldName];
+          delete migratedShortcuts[oldName];
+        }
+      }
+    }
+    
     // Build clean user object for frontend
     const userForFrontend = {
       _id: userIdStr,
@@ -717,7 +749,7 @@ async function loginUser(username, password) {
       name: user.name || '',
       email: user.email || '',
       role: user.role || 'user',
-      plan: user.plan || 'trial',
+      plan: user.plan || 'Free',
       tokens: user.tokens || 0,
       selectedProvider: user.selectedProvider || '',
       voiceProvider: user.voiceProvider || 'default',
@@ -726,7 +758,7 @@ async function loginUser(username, password) {
       deepgramKeyterms: user.deepgramKeyterms || '',
       apiKeys: user.apiKeys || {},
       settings: user.settings || {},
-      shortcuts: user.shortcuts || {}
+      shortcuts: migratedShortcuts
     };
 
     console.log('✅ Returning user with _id:', userForFrontend._id);
