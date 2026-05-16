@@ -4,8 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// Set app identity to prevent "Electron" showing in task manager
+// Set app identity for task manager & process list
 process.title = 'Stealth Assist';
+app.name = 'Stealth Assist';
+// Rename Chromium child processes (GPU, utility, etc.) from 'Electron' to app name
+app.commandLine.appendSwitch('app-name', 'Stealth Assist');
 
 // ALWAYS use localhost for dev, Railway for packaged
 const LOCAL_BACKEND = 'http://localhost:3001';
@@ -17,8 +20,15 @@ const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
 
-// App icon (public/ copied to dist/ during build; fallback to public/ for dev)
-const APP_ICON_PATH = path.join(__dirname, app.isPackaged ? 'dist' : 'public', 'stealth-logo.png');
+// App icon: use stealth-logo1 as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
+const APP_ICON_CANDIDATES = app.isPackaged
+  ? [
+      path.join(process.resourcesPath, 'app', 'dist', 'stealth-logo1.png'),
+      path.join(__dirname, 'dist', 'stealth-logo1.png'),
+      path.join(process.resourcesPath, 'stealth-logo1.png'),
+    ]
+  : [path.join(__dirname, 'public', 'stealth-logo1.png')];
+const APP_ICON_PATH = APP_ICON_CANDIDATES.find(p => fs.existsSync(p)) || APP_ICON_CANDIDATES[0];
 const APP_ICON = nativeImage.createFromPath(APP_ICON_PATH);
 
 // Suppress Electron's default error dialogs for uncaught exceptions
@@ -431,6 +441,20 @@ function stopDeepgramBridge() {
         deepgramProcess = null;
         deepgramReady = false;
     }
+}
+
+// Stop all child processes and force exit
+function stopAllProcesses() {
+    console.log('🛑 Stopping all processes...');
+    stopBackendServer();
+    stopPythonBridge();
+    stopDeepgramBridge();
+    if (floatingWidget) {
+        floatingWidget.close();
+        floatingWidget = null;
+    }
+    globalShortcut.unregisterAll();
+    app.exit(0);
 }
 
 // Debounce voice provider initialization to prevent rapid re-init
@@ -968,9 +992,9 @@ function createMainWindow() {
       }
       
       console.log('📂 FINAL Loading from:', indexPath);
-      mainWindow.loadFile(indexPath, { hash: '/service' });
+      mainWindow.loadFile(indexPath, { hash: '/service', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      mainWindow.loadURL(`${FRONTEND_URL}/#/service`);
+      mainWindow.loadURL(`${FRONTEND_URL}/#/service${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
@@ -986,13 +1010,9 @@ function createMainWindow() {
             mainWindow = null;
             return;
         }
-        // No overlay, quit app
-        console.log('No windows remaining - quitting app');
-        if (pythonProcess) {
-            pythonProcess.kill();
-            pythonProcess = null;
-        }
-        app.quit();
+        // No overlay, clean up all child processes and quit
+        console.log('No windows remaining - cleaning up and quitting app');
+        stopAllProcesses();
         mainWindow = null;
     });
 
@@ -1316,9 +1336,9 @@ function createOverlayWindow() {
       }
       
       console.log('📂 Loading overlay from:', overlayIndexPath);
-      overlay.loadFile(overlayIndexPath, { hash: '/overlay' });
+      overlay.loadFile(overlayIndexPath, { hash: '/overlay', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      overlay.loadURL(`${FRONTEND_URL}/#/overlay`);
+      overlay.loadURL(`${FRONTEND_URL}/#/overlay${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
@@ -1512,17 +1532,9 @@ function createOverlayWindow() {
             overlayWindow = null;
             return;
         }
-        // No main window, quit app
-        console.log('Main window closed');
-        if (pythonProcess) {
-            pythonProcess.kill();
-            pythonProcess = null;
-        }
-        if (floatingWidget) {
-            floatingWidget.close();
-            floatingWidget = null;
-        }
-        app.quit();
+        // No main window, clean up all child processes and quit
+        console.log('No windows remaining - cleaning up and quitting app');
+        stopAllProcesses();
         overlayWindow = null;
     });
 

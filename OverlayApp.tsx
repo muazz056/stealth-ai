@@ -121,7 +121,10 @@ const LS_CHAT_HISTORY_KEY = 'isa_chat_history';
 const LS_USER_KEY = 'isa_current_user';
 const LS_API_KEYS = 'isa_api_keys';
 const LS_API_PROVIDER = 'isa_api_provider';
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const QUERY_BACKEND_URL = typeof window !== 'undefined'
+  ? new URLSearchParams(window.location.search).get('backendUrl')
+  : null;
+const API_BASE_URL = QUERY_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 // Deepgram Nova-3 supported languages (same as App.tsx)
 const DEEPGRAM_LANGUAGES = [

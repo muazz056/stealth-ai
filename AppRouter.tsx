@@ -61,9 +61,9 @@ const AppRouter: React.FC = () => {
               const currentSaved = localStorage.getItem(LS_USER_KEY);
               if (currentSaved) {
                 const current = JSON.parse(currentSaved);
-                // If local user was modified after this fetch started (e.g. language change),
-                // preserve the local version instead of overwriting with stale server data
-                if (current.deepgramLanguage !== user.deepgramLanguage) {
+                // Preserve any user-initiated changes made after this fetch started
+                // (language, keywords, etc.) — prevents stale server data from overwriting them
+                if (current.deepgramLanguage !== user.deepgramLanguage || current.deepgramKeyterms !== user.deepgramKeyterms) {
                   return;
                 }
               }

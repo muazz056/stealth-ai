@@ -43,7 +43,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
-            <img src="/stealth-logo.png" alt="Stealth Assist" className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" />
+            <img src="./stealth-logo.png" alt="Stealth Assist" className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" />
             <div className="hidden sm:block">
               <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">Stealth Assist</h1>
               <p className="text-[10px] text-slate-600 dark:text-slate-500">Stealth Engine V1.2</p>

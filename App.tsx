@@ -34,8 +34,11 @@ import SearchableLanguageSelect from './components/SearchableLanguageSelect';
 
 // API Base URL from environment
 // Use env var - set by Vite at build time based on mode
-const isDev = import.meta.env.DEV;
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+// Electron renderer may receive backendUrl via query param from main process
+const QUERY_BACKEND_URL = typeof window !== 'undefined'
+  ? new URLSearchParams(window.location.search).get('backendUrl')
+  : null;
+const API_BASE_URL = QUERY_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 // Deepgram Nova-3 supported languages
 const DEEPGRAM_LANGUAGES = [
