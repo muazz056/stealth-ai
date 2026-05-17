@@ -2373,34 +2373,23 @@ Respond in ${langDisplay}.]`;
     <div className="min-h-screen bg-white dark:bg-slate-950 transition-colors duration-300 p-4 md:p-8">
       <div className="mx-auto max-w-7xl">
         
-        {/* Header with Action Buttons */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            {/* Left: Title */}
-          <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white">Stealth Assist</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">AI interview assistant</p>
-            </div>
-            
-            {/* Right: Stealth + New Session (Electron only) */}
-            {isElectron && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={launchStealthPip}
-                  className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
-                >
-                  Open Overlay
-                </button>
-                <button
-                  onClick={handleNewSession}
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
-                >
-                  New Session
-                </button>
-              </div>
-            )}
+        {/* Centered Action Buttons (Electron only) */}
+        {isElectron && (
+          <div className="flex items-center justify-center gap-3 mb-6">
+            <button
+              onClick={launchStealthPip}
+              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
+            >
+              Open Overlay
+            </button>
+            <button
+              onClick={handleNewSession}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-md hover:shadow-lg"
+            >
+              New Session
+            </button>
           </div>
-          </div>
+        )}
 
         {/* Section 1: Voice Assist Configuration */}
         <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
@@ -2438,6 +2427,11 @@ Respond in ${langDisplay}.]`;
                   if (langRes.ok) {
                     let updatedUser = { ...user, deepgramLanguage: val };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                    // Notify overlay immediately
+                    if (typeof window !== 'undefined' && (window as any).require) {
+                      const { ipcRenderer } = (window as any).require('electron');
+                      ipcRenderer.send('notify-overlay-settings-changed');
+                    }
                   }
                 } catch (_) {}
                 // Restart voice if currently listening
@@ -2478,6 +2472,10 @@ Respond in ${langDisplay}.]`;
                     let updatedUser = { ...user, settings: { ...user.settings, responseLanguage: val } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', val);
+                    if (typeof window !== 'undefined' && (window as any).require) {
+                      const { ipcRenderer } = (window as any).require('electron');
+                      ipcRenderer.send('notify-overlay-settings-changed');
+                    }
                   }
                 } catch (_) {}
               }}

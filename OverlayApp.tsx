@@ -685,6 +685,45 @@ const OverlayApp: React.FC = () => {
     }
   };
 
+  // Shared helper: fetch user from DB and sync ALL state (settings, language, keyterms)
+  // Used by mount, settings-updated IPC, and modal open handlers
+  const syncUserSettings = async (source: string) => {
+    try {
+      const userStr = localStorage.getItem(LS_USER_KEY);
+      if (!userStr) return;
+      const parsed = JSON.parse(userStr);
+      if (!parsed?._id) return;
+      const res = await fetch(`${API_BASE_URL}/api/auth/user/${parsed._id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && data.user) {
+        const freshUser = data.user;
+        const mergedUser = { ...parsed, ...freshUser };
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
+        const s = freshUser.settings || {};
+        setOverlayUserSettings(s);
+        if (freshUser.deepgramLanguage) setCurrentLanguage(freshUser.deepgramLanguage);
+        if (freshUser.deepgramKeyterms !== undefined) setCurrentKeyterms(freshUser.deepgramKeyterms);
+        if (s.cvSummary) localStorage.setItem('isa_cv_summary', s.cvSummary);
+        if (s.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', s.basePromptSummary);
+        if (s.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', s.jobDescriptionSummary);
+        if (s.companyInfoSummary) localStorage.setItem('isa_company_info_summary', s.companyInfoSummary);
+        if (s.cvText) localStorage.setItem(LS_RESUME_CONTENT_KEY, s.cvText);
+        if (s.jobDescription) localStorage.setItem(LS_JD_KEY, s.jobDescription);
+        if (s.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, s.companyInfo);
+        if (s.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, s.basePrompt);
+        if (s.responseLanguage) localStorage.setItem('isa_response_language', s.responseLanguage);
+        console.log(`✅ [Overlay] User settings synced from DB (${source}):`, {
+          deepgramLanguage: freshUser.deepgramLanguage,
+          deepgramKeyterms: freshUser.deepgramKeyterms,
+          hasSettings: !!s
+        });
+      }
+    } catch (e) {
+      console.warn(`Failed to sync user settings from DB (${source}):`, e);
+    }
+  };
+
   // Initialize
   useEffect(() => {
     document.body.classList.add('overlay-mode');
@@ -746,37 +785,7 @@ const OverlayApp: React.FC = () => {
       console.log('📜 Loaded conversation history:', history.length, 'messages');
     });
 
-    // Fetch latest user/settings from DB to keep summaries synced
-    const refreshUserFromDB = async () => {
-      try {
-        const userStr = localStorage.getItem(LS_USER_KEY);
-        if (!userStr) return;
-        const parsed = JSON.parse(userStr);
-        if (!parsed?._id) return;
-        const res = await fetch(`${API_BASE_URL}/api/auth/user/${parsed._id}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.success && data.user) {
-          const mergedUser = { ...parsed, ...data.user };
-          localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
-          const s = data.user.settings || {};
-          setOverlayUserSettings(s);
-          // persist summaries individually for compatibility
-          if (s.cvSummary) localStorage.setItem('isa_cv_summary', s.cvSummary);
-          if (s.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', s.basePromptSummary);
-          if (s.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', s.jobDescriptionSummary);
-          if (s.companyInfoSummary) localStorage.setItem('isa_company_info_summary', s.companyInfoSummary);
-          if (s.cvText) localStorage.setItem(LS_RESUME_CONTENT_KEY, s.cvText);
-          if (s.jobDescription) localStorage.setItem(LS_JD_KEY, s.jobDescription);
-          if (s.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, s.companyInfo);
-          if (s.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, s.basePrompt);
-          if (s.responseLanguage) localStorage.setItem('isa_response_language', s.responseLanguage);
-        }
-      } catch (e) {
-        console.warn('Failed to refresh user from DB in overlay:', e);
-      }
-    };
-    refreshUserFromDB();
+    syncUserSettings('mount');
     
     // Get API keys from localStorage (set by main app)
     const apiKeysStr = localStorage.getItem(LS_API_KEYS);
@@ -934,34 +943,8 @@ const OverlayApp: React.FC = () => {
         });
         console.log('💫 Overlay settings are now up-to-date!');
 
-        // Also refresh user/settings from DB to ensure summaries persist
-        (async () => {
-          try {
-            const userStr = localStorage.getItem(LS_USER_KEY);
-            if (!userStr) return;
-            const parsed = JSON.parse(userStr);
-            if (!parsed?._id) return;
-            const res = await fetch(`${API_BASE_URL}/api/auth/user/${parsed._id}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data?.success && data.user) {
-              const mergedUser = { ...parsed, ...data.user };
-              localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
-              const s = data.user.settings || {};
-              setOverlayUserSettings(s);
-              if (s.cvSummary) localStorage.setItem('isa_cv_summary', s.cvSummary);
-              if (s.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', s.basePromptSummary);
-              if (s.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', s.jobDescriptionSummary);
-              if (s.companyInfoSummary) localStorage.setItem('isa_company_info_summary', s.companyInfoSummary);
-              if (s.cvText) localStorage.setItem(LS_RESUME_CONTENT_KEY, s.cvText);
-              if (s.jobDescription) localStorage.setItem(LS_JD_KEY, s.jobDescription);
-              if (s.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, s.companyInfo);
-              if (s.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, s.basePrompt);
-            }
-          } catch (e) {
-            console.warn('Failed to refresh user from DB (settings-updated):', e);
-          }
-        })();
+        // Also refresh user/settings from DB to ensure all data is in sync
+        syncUserSettings('settings-updated');
       });
 
       // Listen for chat history updates from main app (Real-Time Sync)
@@ -2917,7 +2900,8 @@ ${companyInfoSummary}`;
         <div className="ml-auto flex items-center gap-2">
           {/* Language Button (always visible) */}
           <button
-            onClick={() => {
+            onClick={async () => {
+              await syncUserSettings('modal-language');
               setLanguageModalOpen(true);
               hideBrowserForModal();
             }}
@@ -2931,7 +2915,8 @@ ${companyInfoSummary}`;
           
           {/* Keywords Button */}
           <button
-            onClick={() => {
+            onClick={async () => {
+              await syncUserSettings('modal-keywords');
               setKeywordsModalOpen(true);
               hideBrowserForModal();
             }}
@@ -3379,6 +3364,7 @@ ${companyInfoSummary}`;
                               language: newLang,
                               keyterms: keyterms
                             });
+                            ipcRenderer.send('notify-overlay-settings-changed');
                             console.log('✅ [Overlay] Voice provider re-initialized with new language');
                           }
                         } else {
@@ -3534,6 +3520,7 @@ ${companyInfoSummary}`;
                             language: currentLanguage,
                             keyterms: currentKeyterms
                           });
+                          ipcRenderer.send('notify-overlay-settings-changed');
                         }
                         console.log('✅ [Overlay] Keywords saved to database');
                       }

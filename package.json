@@ -15,7 +15,7 @@
     "backend": "node backend/server.cjs",
     "backend-dev": "nodemon backend/server.cjs",
     "start": "concurrently \"npm run backend\" \"npm run dev\" \"wait-on http://localhost:3001 http://localhost:5173 && electron main.cjs\"",
-    "create-admin": "node backend/create-admin.cjs",
+    "create-admin": "node create-admin.cjs",
     "create-super-admin": "node backend/create-super-admin.cjs",
     "install-stealth": "npm install ffi-napi ref-napi",
     "postinstall": "echo 'For Windows stealth features, run: npm run install-stealth'",
@@ -102,62 +102,62 @@
       ".env"
     ],
     "asar": false,
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "public/stealth-logo.png",
-      "signAndEditExecutable": false,
-      "verifyUpdateCodeSignature": false
+"win": {
+  "target": [
+    {
+      "target": "nsis",
+      "arch": [
+        "x64"
+      ]
     },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "public/stealth-logo.png",
-      "category": "public.app-category.productivity"
+    {
+      "target": "portable",
+      "arch": [
+        "x64"
+      ]
+    }
+  ],
+  "icon": "public/stealth-logo-512.png",
+  "signAndEditExecutable": false,
+  "verifyUpdateCodeSignature": false
+},
+"mac": {
+  "target": [
+    {
+      "target": "dmg",
+      "arch": [
+        "x64",
+        "arm64"
+      ]
     },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "public/stealth-logo.png",
-      "category": "Utility"
+    {
+      "target": "zip",
+      "arch": [
+        "x64",
+        "arm64"
+      ]
+    }
+  ],
+  "icon": "public/stealth-logo-512.png",
+  "category": "public.app-category.productivity"
+},
+"linux": {
+  "target": [
+    {
+      "target": "AppImage",
+      "arch": [
+        "x64"
+      ]
+    },
+    {
+      "target": "deb",
+      "arch": [
+        "x64"
+      ]
+    }
+  ],
+  "icon": "public/stealth-logo-512.png",
+  "category": "Utility"
     },
     "nsis": {
       "oneClick": false,

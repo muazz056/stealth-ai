@@ -5,10 +5,21 @@ const fs = require('fs');
 const os = require('os');
 
 // Set app identity for task manager & process list
+// On Windows, process.title sets both console title AND helps some tools identify the process.
+// For Task Manager's Processes tab, the displayed name comes from the
+// executable's FileDescription metadata (set by electron-builder via rcedit).
 process.title = 'Stealth Assist';
 app.name = 'Stealth Assist';
 // Rename Chromium child processes (GPU, utility, etc.) from 'Electron' to app name
 app.commandLine.appendSwitch('app-name', 'Stealth Assist');
+// requestSingleInstanceLock ensures only one instance and helps with Windows taskbar grouping
+const gotLock = app.requestSingleInstanceLock();
+app.on('second-instance', () => {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+    }
+});
 
 // ALWAYS use localhost for dev, Railway for packaged
 const LOCAL_BACKEND = 'http://localhost:3001';
@@ -20,14 +31,16 @@ const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
 
-// App icon: use stealth-logo1 as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
+// App icon: use square stealth-logo-icon as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
+// Square PNG is required for Windows ICO conversion in electron-builder
+const ICON_FILENAME = 'stealth-logo-512.png';
 const APP_ICON_CANDIDATES = app.isPackaged
   ? [
-      path.join(process.resourcesPath, 'app', 'dist', 'stealth-logo1.png'),
-      path.join(__dirname, 'dist', 'stealth-logo1.png'),
-      path.join(process.resourcesPath, 'stealth-logo1.png'),
+      path.join(process.resourcesPath, 'app', 'dist', ICON_FILENAME),
+      path.join(__dirname, 'dist', ICON_FILENAME),
+      path.join(process.resourcesPath, ICON_FILENAME),
     ]
-  : [path.join(__dirname, 'public', 'stealth-logo1.png')];
+  : [path.join(__dirname, 'public', ICON_FILENAME)];
 const APP_ICON_PATH = APP_ICON_CANDIDATES.find(p => fs.existsSync(p)) || APP_ICON_CANDIDATES[0];
 const APP_ICON = nativeImage.createFromPath(APP_ICON_PATH);
 
@@ -1565,8 +1578,16 @@ function createOverlayWindow() {
 }
 
 app.whenReady().then(() => {
-    // Set app identity for Windows taskbar
+    // Set app identity for Windows taskbar & process list (must be inside whenReady)
     app.setAppUserModelId('com.stealthassist.app');
+    // Re-assert process title after Electron initialization (may have been reset)
+    process.title = 'Stealth Assist';
+    
+    // Single instance lock: focus existing instance instead of launching new one
+    if (!gotLock) {
+        app.quit();
+        return;
+    }
     
     // Load auth module first
     loadAuthModule();

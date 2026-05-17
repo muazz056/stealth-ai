@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import LandingPage from './pages/LandingPage';
@@ -243,7 +243,7 @@ const AppRouter: React.FC = () => {
 
   return (
     <DarkModeProvider>
-      <BrowserRouter>
+      <HashRouter>
       {/* Setup Loader with Progress Bar */}
       {showSetupLoader && (
         <div className="fixed inset-0 bg-white dark:bg-slate-950 flex items-center justify-center z-[10000] transition-colors duration-300">
@@ -364,7 +364,31 @@ const AppRouter: React.FC = () => {
         {/* Electron: Skip landing pages, go straight to app */}
         {isElectron ? (
           <>
-            {/* For Electron, only show app and auth routes */}
+            {/* For Electron, only show app, auth, and admin routes */}
+            <Route
+              path="/admin/settings"
+              element={
+                isAuthenticated ? (
+                  <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
+                    <Navbar 
+                      user={currentUser} 
+                      onLogout={handleLogout}
+                      showAllLinks={true}
+                    />
+                    <div className="flex-grow">
+                      <SuperAdminPage user={currentUser} />
+                    </div>
+                    <Footer />
+                  </div>
+                ) : (
+                  <>
+                    <Navbar user={currentUser} onLogout={handleLogout} />
+                    <AuthPage onAuthSuccess={handleAuthSuccess} />
+                    <Footer />
+                  </>
+                )
+              }
+            />
             <Route
               path="*"
               element={
@@ -500,7 +524,7 @@ const AppRouter: React.FC = () => {
           </>
         )}
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
     </DarkModeProvider>
   );
 };
