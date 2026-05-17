@@ -107,98 +107,122 @@ function isPortInUse(port) {
     });
 }
 
-// Start backend server
-async function startBackendServer() {
-    if (backendProcess) {
-        console.log('⚠️ Backend server already running');
-        return;
-    }
-    
-    console.log('🚀 Starting backend server...');
-    
-    // Check if port 3001 is already in use (e.g., from npm run backend)
-    const portInUse = await isPortInUse(3001);
-    if (portInUse) {
-        console.log('✅ Backend already running on port 3001 (external). Skipping spawn.');
-        backendReady = true;
-        return;
-    }
-    
-    try {
-        const backendPath = app.isPackaged
-            ? path.join(process.resourcesPath, 'backend', 'server.cjs')
-            : path.join(__dirname, 'backend', 'server.cjs');
-        
-        console.log('📂 Backend path:', backendPath);
-        
-        // Check if backend file exists
-        if (!fs.existsSync(backendPath)) {
-            console.error('❌ Backend server file not found:', backendPath);
+// Start backend server. Returns a Promise that resolves when the backend
+// is actually listening (or fails to start after a timeout).
+function startBackendServer() {
+    return new Promise(async (resolve) => {
+        if (backendProcess) {
+            console.log('⚠️ Backend server already running');
+            resolve(true);
             return;
         }
         
-        // Set up environment for packaged app
-        const env = { ...process.env };
+        console.log('🚀 Starting backend server...');
         
-        if (app.isPackaged) {
-            // In packaged app, node_modules are in app.asar or resources
-            const appPath = path.dirname(app.getAppPath());
-            const nodeModulesPath = path.join(appPath, 'node_modules');
-            const resourcesPath = process.resourcesPath;
-            
-            console.log('📦 App path:', app.getAppPath());
-            console.log('📦 Resources path:', resourcesPath);
-            console.log('📦 Node modules path:', nodeModulesPath);
-            
-            // Set NODE_PATH so backend can find modules
-            env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
-            
-            // Set dotenv config path to find .env file
-            env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
+        // Check if port 3001 is already in use (e.g., from npm run backend)
+        const portInUse = await isPortInUse(3001);
+        if (portInUse) {
+            console.log('✅ Backend already running on port 3001 (external). Skipping spawn.');
+            backendReady = true;
+            resolve(true);
+            return;
         }
         
-        // Spawn Node.js process for backend
-        backendProcess = spawn('node', [backendPath], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-            cwd: app.isPackaged ? process.resourcesPath : __dirname,
-            env: env
-        });
-        
-        // Handle backend stdout
-        backendProcess.stdout.on('data', (data) => {
-            const output = data.toString();
-            console.log('🔵 Backend:', output.trim());
-            
-            if (output.includes('listening') || output.includes('started') || output.includes('3001')) {
-                backendReady = true;
-                console.log('✅ Backend server ready!');
+        try {
+            let backendPath;
+            if (app.isPackaged) {
+                const candidates = [
+                    path.join(__dirname, 'backend', 'server.cjs'),
+                    path.join(process.resourcesPath, 'app', 'backend', 'server.cjs'),
+                    path.join(process.resourcesPath, 'backend', 'server.cjs'),
+                ];
+                backendPath = candidates.find(p => fs.existsSync(p));
+                if (!backendPath) {
+                    console.error('❌ Backend server file not found. Checked:');
+                    candidates.forEach(p => console.error('   -', p, fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
+                    resolve(false);
+                    return;
+                }
+            } else {
+                backendPath = path.join(__dirname, 'backend', 'server.cjs');
             }
-        });
-        
-        // Handle backend stderr
-        backendProcess.stderr.on('data', (data) => {
-            console.error('🔴 Backend error:', data.toString().trim());
-        });
-        
-        // Handle backend exit
-        backendProcess.on('close', (code) => {
-            console.log(`🔵 Backend server exited with code ${code}`);
+            
+            console.log('📂 Backend path:', backendPath);
+            
+            // Set up environment for packaged app
+            const env = { ...process.env };
+            
+            if (app.isPackaged) {
+                const appPath = path.dirname(app.getAppPath());
+                const nodeModulesPath = path.join(appPath, 'node_modules');
+                const resourcesPath = process.resourcesPath;
+                
+                console.log('📦 App path:', app.getAppPath());
+                console.log('📦 Resources path:', resourcesPath);
+                console.log('📦 Node modules path:', nodeModulesPath);
+                
+                env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
+                env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
+            }
+            
+            // Spawn Node.js process for backend
+            backendProcess = spawn('node', [backendPath], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                cwd: app.isPackaged ? process.resourcesPath : __dirname,
+                env: env
+            });
+            
+            // Set a timeout for backend readiness
+            const readyTimeout = setTimeout(() => {
+                if (!backendReady) {
+                    console.warn('⚠️ Backend server not ready after timeout, continuing anyway');
+                    resolve(false);
+                }
+            }, 15000);
+            
+            // Handle backend stdout
+            backendProcess.stdout.on('data', (data) => {
+                const output = data.toString();
+                console.log('🔵 Backend:', output.trim());
+                
+                if (output.includes('listening') || output.includes('started') || output.includes('3001')) {
+                    backendReady = true;
+                    clearTimeout(readyTimeout);
+                    console.log('✅ Backend server ready!');
+                    resolve(true);
+                }
+            });
+            
+            // Handle backend stderr
+            backendProcess.stderr.on('data', (data) => {
+                console.error('🔴 Backend error:', data.toString().trim());
+            });
+            
+            // Handle backend exit
+            backendProcess.on('close', (code) => {
+                clearTimeout(readyTimeout);
+                console.log(`🔵 Backend server exited with code ${code}`);
+                backendProcess = null;
+                backendReady = false;
+                resolve(false);
+            });
+            
+            // Handle spawn errors
+            backendProcess.on('error', (error) => {
+                clearTimeout(readyTimeout);
+                console.error('❌ Failed to start backend server:', error.message);
+                backendProcess = null;
+                backendReady = false;
+                resolve(false);
+            });
+            
+        } catch (error) {
+            console.error('❌ Error starting backend server:', error.message);
             backendProcess = null;
             backendReady = false;
-        });
-        
-        // Handle spawn errors
-        backendProcess.on('error', (error) => {
-            console.error('❌ Failed to start backend server:', error.message);
-            backendProcess = null;
-            backendReady = false;
-        });
-        
-    } catch (error) {
-        console.error('❌ Error starting backend server:', error.message);
-        backendProcess = null;
-        backendReady = false;
-    }
+            resolve(false);
+        }
+    });
 }
 
 // Stop backend server
@@ -786,6 +810,46 @@ ipcMain.handle('python-available', async () => {
     }
 });
 
+// Retry helper: fetch a URL up to `retries` times with `delayMs` between attempts.
+// Returns the Response on success, or null if all attempts fail.
+async function fetchWithRetry(url, retries = 5, delayMs = 1000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const response = await fetch(url);
+            if (response.ok) return response;
+            console.log(`⚠️ [MAIN] fetchWithRetry(${url}) attempt ${attempt}/${retries}: status ${response.status}`);
+        } catch (err) {
+            console.log(`⚠️ [MAIN] fetchWithRetry(${url}) attempt ${attempt}/${retries}: ${err.message}`);
+        }
+        if (attempt < retries) {
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+    }
+    return null;
+}
+
+// Attempt to resolve a Deepgram chain config from the backend (with retries).
+// Returns the config object on success, or null if the chain is unavailable.
+async function resolveDeepgramChain(voiceProvider, apiKey, language, keyterms) {
+    // If we already have an apiKey (user's personal key), skip chain lookup
+    if (apiKey) return null;
+    
+    console.log(`🎤 [MAIN] resolveDeepgramChain: provider=${voiceProvider}, hasKey=${!!apiKey}`);
+    const response = await fetchWithRetry(`${BACKEND_URL}/api/auth/deepgram-chain-public`, 5, 1000);
+    if (response) {
+        try {
+            const data = await response.json();
+            if (data?.success && data.config?.apiKey) {
+                console.log('✅ [MAIN] Using system Deepgram chain key');
+                return data.config;
+            }
+        } catch (e) {
+            console.error('❌ [MAIN] Failed to parse chain response:', e.message);
+        }
+    }
+    return null;
+}
+
 // Initialize/Switch voice provider
 ipcMain.on('init-voice-provider', async (event, { voiceProvider, apiKey, language, keyterms }) => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -796,47 +860,17 @@ ipcMain.on('init-voice-provider', async (event, { voiceProvider, apiKey, languag
     console.log('📡 [MAIN] Keyterms:', keyterms ? 'Yes' : 'No');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
-    // If voiceProvider is 'deepgram' but no apiKey was provided, try to fetch from system Deepgram chain
-    if (voiceProvider === 'deepgram' && !apiKey) {
-        try {
-            console.log('🎤 [MAIN] No deepgram apiKey provided, checking system chain...');
-            const response = await fetch(`${BACKEND_URL}/api/auth/deepgram-chain-public`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data?.success && data.config?.apiKey) {
-                    apiKey = data.config.apiKey;
-                    if (!language) language = data.config.language || 'multi';
-                    if (!keyterms) keyterms = data.config.keyterms || '';
-                    console.log('✅ [MAIN] Using system Deepgram chain key');
-                }
-            }
-        } catch (err) {
-            console.error('❌ [MAIN] Failed to fetch system Deepgram chain:', err.message);
-        }
+    // Try to resolve system Deepgram chain (retries up to 5 seconds)
+    const chainConfig = await resolveDeepgramChain(voiceProvider, apiKey, language, keyterms);
+    if (chainConfig) {
+        apiKey = chainConfig.apiKey;
+        if (!language) language = chainConfig.language || 'multi';
+        if (!keyterms) keyterms = chainConfig.keyterms || '';
+        initializeVoiceProvider('deepgram', apiKey, language, keyterms);
+        return;
     }
     
-    // Even if voiceProvider is 'default', if a system Deepgram chain exists, use it
-    if (voiceProvider === 'default' && !apiKey) {
-        try {
-            console.log('🎤 [MAIN] Checking system Deepgram chain for default provider...');
-            const response = await fetch(`${BACKEND_URL}/api/auth/deepgram-chain-public`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data?.success && data.config?.apiKey) {
-                    apiKey = data.config.apiKey;
-                    if (!language) language = data.config.language || 'multi';
-                    if (!keyterms) keyterms = data.config.keyterms || '';
-                    console.log('✅ [MAIN] Using system Deepgram chain key (overriding default)');
-                    initializeVoiceProvider('deepgram', apiKey, language, keyterms);
-                    return;
-                }
-            }
-        } catch (err) {
-            console.error('❌ [MAIN] Failed to fetch system Deepgram chain:', err.message);
-        }
-    }
-    
-    initializeVoiceProvider(voiceProvider, apiKey, language || '', keyterms || '');
+    initializeVoiceProvider(voiceProvider, apiKey || '', language || '', keyterms || '');
 });
 
 // ==================== END WHISPER ====================
@@ -1592,16 +1626,17 @@ app.whenReady().then(() => {
     // Load auth module first
     loadAuthModule();
     
-    // Start backend server first
+    // Start backend server (async, non-blocking). The frontend's init-voice-provider
+    // IPC handler has retry logic (5s) and will wait for backend readiness.
     console.log('🚀 Starting backend server...');
-    startBackendServer();
+    startBackendServer().then(ready => {
+        console.log('🔧 Backend server startup result:', ready ? 'READY' : 'NOT READY');
+    }).catch(err => {
+        console.error('🔧 Backend server startup error:', err.message);
+    });
     
-    // Create main setup window
+    // Create main setup window immediately (don't block on backend)
     createMainWindow();
-    
-    // SPEED OPTIMIZATION: Start default voice provider (Python by default, can be changed by user)
-    console.log('🚀 Starting default voice provider (Python)...');
-    initializeVoiceProvider('default');
     
     // ==================== POWER MANAGEMENT ====================
     // Handle system sleep/wake events to prevent blank overlay after sleep
