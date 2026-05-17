@@ -6,7 +6,7 @@
  */
 
 const API_BASE_URL = typeof window !== 'undefined'
-  ? (import.meta as any)?.env?.VITE_BACKEND_URL || 'http://localhost:3001'
+  ? new URLSearchParams(window.location.search).get('backendUrl') || import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
   : 'http://localhost:3001';
 
 export interface DeepgramConfig {
