@@ -31,7 +31,7 @@ const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
 
-// App icon: use square stealth-logo-icon as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
+// App icon: use square stealth-logo1 as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
 // Square PNG is required for Windows ICO conversion in electron-builder
 const ICON_FILENAME = 'stealth-logo-512.png';
 const APP_ICON_CANDIDATES = app.isPackaged

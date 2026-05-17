@@ -117,7 +117,7 @@
       ]
     }
   ],
-  "icon": "public/stealth-logo-512.png",
+"icon": "public/stealth-logo-512.png",
   "signAndEditExecutable": false,
   "verifyUpdateCodeSignature": false
 },
@@ -165,10 +165,8 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Stealth Assist"
-    },
-    "portable": {
-      "artifactName": "InterviewStealthAssist-Portable.exe"
+      "shortcutName": "Stealth Assist",
+      "publisher": "Chaudhry Muaz"
     }
   }
 }
