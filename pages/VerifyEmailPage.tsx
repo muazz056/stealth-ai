@@ -39,6 +39,7 @@ const VerifyEmailPage: React.FC = () => {
   const verificationStarted = useRef(false);
 
   useEffect(() => {
+    const API_BASE_URL = getApiUrl();
     const token = searchParams.get('token');
     
     if (!token) {
