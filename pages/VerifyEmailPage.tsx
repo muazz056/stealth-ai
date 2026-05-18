@@ -1,28 +1,35 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
-// Get backend API URL (can be passed as search param or use Railway)
+// Get backend API URL from search params (both main URL and hash-based)
 const getApiUrl = () => {
-  // First: check if backend URL is passed in search params
-  const params = new URLSearchParams(window.location.search);
-  const backendFromUrl = params.get('backend');
-  if (backendFromUrl) return decodeURIComponent(backendFromUrl);
+  // Check main URL search params
+  const mainParams = new URLSearchParams(window.location.search);
+  const fromMain = mainParams.get('backend');
+  if (fromMain) return decodeURIComponent(fromMain);
   
-  // Second: use VITE_BACKEND_URL (Railway env var)
+  // Check hash-based search params (HashRouter: #/path?key=val)
+  const hash = window.location.hash;
+  const hashQueryIndex = hash.indexOf('?');
+  if (hashQueryIndex !== -1) {
+    const hashParams = new URLSearchParams(hash.substring(hashQueryIndex));
+    const fromHash = hashParams.get('backend');
+    if (fromHash) return decodeURIComponent(fromHash);
+  }
+  
+  // Then: use VITE_BACKEND_URL (Railway env var)
   const railwayUrl = import.meta.env.VITE_BACKEND_URL;
   if (railwayUrl) return railwayUrl;
   
-  // Third: in Electron, use VITE_API_BASE_URL
+  // In Electron, use VITE_API_BASE_URL
   if (typeof window !== 'undefined' && (window as any).require) {
     return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
   }
   
   // Fallback: derive from current origin (replace Vercel with Railway)
   const origin = window.location.origin;
-  return origin.replace('stealth-ai-sand.vercel.app', 'your-app.up.railway.app');
+  return origin.replace('stealth-ai-sand.vercel.app', 'stealth-ai-production-e686.up.railway.app');
 };
-
-const API_BASE_URL = getApiUrl();
 
 const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();

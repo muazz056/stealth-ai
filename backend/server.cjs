@@ -79,7 +79,7 @@ async function sendVerificationEmail(email, token, username) {
     ? process.env.VITE_BACKEND_URL
     : (process.env.API_BASE_URL || 'http://localhost:3001');
   
-  const verificationLink = `${frontendUrl}/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
+  const verificationLink = `${frontendUrl}/#/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
 
   const emailData = JSON.stringify({
     sender: { email: senderEmail, name: 'Stealth AI' },

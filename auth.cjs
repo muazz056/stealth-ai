@@ -64,7 +64,8 @@ async function sendVerificationEmail(email, token, username) {
     return { success: false, message: 'Email sender not configured' };
   }
 
-  const verificationLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
+  const backendUrl = process.env.VITE_BACKEND_URL || process.env.API_BASE_URL || 'http://localhost:3001';
+  const verificationLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:5173'}/#/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
 
   const emailData = JSON.stringify({
     sender: { email: senderEmail, name: 'Stealth AI' },

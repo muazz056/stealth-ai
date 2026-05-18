@@ -117,7 +117,7 @@
       ]
     }
   ],
-"icon": "public/stealth-logo-512.png",
+"icon": "public/stealth-logo-512.ico",
   "signAndEditExecutable": false,
   "verifyUpdateCodeSignature": false
 },
