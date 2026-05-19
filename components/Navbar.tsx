@@ -113,7 +113,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                 {/* Electron: Only Welcome + Logout */}
                 {isElectron ? (
                   <>
-                    <TokenBadge user={user} onUpgrade={() => window.location.hash = '#/pricing'} />
+                    <TokenBadge user={user} onUpgrade={() => window.location.href = '/pricing'} />
                     
                     <span className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">
                       Welcome, <span className="text-black dark:text-white font-bold">{user.name}</span>
@@ -138,7 +138,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       </button>
                     )}
                     
-                    <TokenBadge user={user} onUpgrade={() => window.location.hash = '#/pricing'} />
+                    <TokenBadge user={user} onUpgrade={() => window.location.href = '/pricing'} />
                     
                     <span className="text-xs text-slate-700 dark:text-slate-500">Welcome, {user.name}</span>
                     
@@ -241,7 +241,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                   {/* Electron: Only Welcome + Logout in mobile */}
                   {isElectron ? (
                     <>
-                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.hash = '#/pricing'; setMobileMenuOpen(false); }} />
+                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.href = '/pricing'; setMobileMenuOpen(false); }} />
                       
                       <div className="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">
                         Welcome, <span className="text-black dark:text-white font-bold">{user.name}</span>
@@ -259,7 +259,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                     </>
                   ) : (
                     <>
-                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.hash = '#/pricing'; setMobileMenuOpen(false); }} />
+                      <TokenBadge user={user} isMobile onUpgrade={() => { window.location.href = '/pricing'; setMobileMenuOpen(false); }} />
                       
                       <div className="px-4 py-2 text-sm text-slate-700 dark:text-slate-500">Welcome, {user.name}</div>
                       

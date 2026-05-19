@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
+// Helper: clean redirect using React Router's navigate (BrowserRouter)
+const redirectTo = (path: string) => {
+  window.location.href = window.location.origin + path;
+};
+
 // Get backend API URL from search params (both main URL and hash-based)
 const getApiUrl = () => {
   // Check main URL search params
@@ -8,7 +13,7 @@ const getApiUrl = () => {
   const fromMain = mainParams.get('backend');
   if (fromMain) return decodeURIComponent(fromMain);
   
-  // Check hash-based search params (HashRouter: #/path?key=val)
+  // Check hash-based search params (HashRouter: /path?key=val)
   const hash = window.location.hash;
   const hashQueryIndex = hash.indexOf('?');
   if (hashQueryIndex !== -1) {
@@ -33,7 +38,6 @@ const getApiUrl = () => {
 
 const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
   const [message, setMessage] = useState('');
   const verificationStarted = useRef(false);
@@ -66,12 +70,12 @@ const VerifyEmailPage: React.FC = () => {
 
         if (data.success) {
           console.log('✅ Email verified! Redirecting to login...');
-          // Redirect to login page immediately
-          setTimeout(() => {
-            navigate('/service');
-          }, 1000); // Small delay to show success message
           setStatus('success');
           setMessage('Email verified! Redirecting to login...');
+          // Redirect to /service after a short delay
+          setTimeout(() => {
+            redirectTo('/service');
+          }, 1500);
         } else {
           setStatus('error');
           setMessage(data.message);
@@ -95,6 +99,16 @@ const VerifyEmailPage: React.FC = () => {
               <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
               <h2 className="text-2xl font-bold text-black dark:text-white mb-2">Verifying your email...</h2>
               <p className="text-slate-600 dark:text-slate-400">Please wait while we verify your account.</p>
+              <div className="mt-6 space-y-2">
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"></div>
+                  <span>Verifying your email address</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <div className="w-4 h-4 rounded-full border-2 border-slate-300"></div>
+                  <span>Auto-redirecting to app</span>
+                </div>
+              </div>
             </>
           )}
 
@@ -104,10 +118,10 @@ const VerifyEmailPage: React.FC = () => {
               <h2 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">Email Verified!</h2>
               <p className="text-slate-600 dark:text-slate-400 mb-6">{message}</p>
               <button
-                onClick={() => navigate('/service')}
+                onClick={() => redirectTo('/service')}
                 className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all"
               >
-                Go to Login
+                Go to App
               </button>
             </>
           )}
@@ -118,7 +132,7 @@ const VerifyEmailPage: React.FC = () => {
               <h2 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-2">Verification Failed</h2>
               <p className="text-slate-600 dark:text-slate-400 mb-6">{message}</p>
               <button
-                onClick={() => navigate('/')}
+                onClick={() => redirectTo('/')}
                 className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all"
               >
                 Go to Home

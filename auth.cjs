@@ -65,7 +65,7 @@ async function sendVerificationEmail(email, token, username) {
   }
 
   const backendUrl = process.env.VITE_BACKEND_URL || process.env.API_BASE_URL || 'http://localhost:3001';
-  const verificationLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:5173'}/#/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
+  const verificationLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
 
   const emailData = JSON.stringify({
     sender: { email: senderEmail, name: 'Stealth AI' },
@@ -1092,6 +1092,206 @@ async function clearConversationHistory(userId) {
   }
 }
 
+// ==================== GOOGLE OAUTH ====================
+
+const { OAuth2Client } = require('google-auth-library');
+
+async function googleLogin(credential) {
+  try {
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    if (!GOOGLE_CLIENT_ID) {
+      console.error('❌ GOOGLE_CLIENT_ID not set in environment');
+      return { success: false, message: 'Google OAuth not configured' };
+    }
+
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+    
+    // Verify the Google ID token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload['sub'];
+    const email = payload['email'];
+    const name = payload['name'] || email.split('@')[0];
+    const picture = payload['picture'] || '';
+
+    if (!email) {
+      return { success: false, message: 'No email returned from Google' };
+    }
+
+    console.log('✅ Google login verified for:', email);
+
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    // Check if user already exists
+    let user = await users.findOne({ email });
+
+    if (user) {
+      // User exists - update googleId if not set
+      if (!user.googleId) {
+        await users.updateOne(
+          { _id: user._id },
+          { $set: { googleId, picture, name, verified: true } }
+        );
+      }
+
+      // Block if email not verified (should never happen for Google but safety check)
+      if (!user.verified) {
+        await users.updateOne(
+          { _id: user._id },
+          { $set: { verified: true } }
+        );
+      }
+    } else {
+      // Create new user with auto-verified = true
+      const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
+
+CONTEXT RULES:
+1. Document = single source of truth
+- Use mentioned skills, experience, projects, education
+- NEVER invent, exaggerate, or assume
+2. Description provided = align answers directly to it
+3. Info provided = tailor responses accordingly
+4. No context = use best practices
+
+ANSWER STRUCTURE:
+- Professional, confident tone , important information first
+
+TRANSCRIPTION ROBUSTNESS:
+- Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
+- Intelligently analyze intent using provided context
+
+CLARIFICATION:
+- If multiple interpretations possible:
+- Choose most likely one based on context (Job description or resume)
+- Answer directly without asking clarifying questions or mentioning in the response.
+
+
+RESPONSE BEHAVIOR:
+- Do NOT mention transcription errors or corrections
+- Do NOT explain correction process
+- Never mention you are AI or language model
+- Answer confidently as if question was clearly spoken
+
+CODING/TECHNICAL QUESTIONS:
+- Provide correct, clean code or technical explanation
+- Explain each approach if necessary
+
+EXAMPLES:
+- Give examples to improve clarity
+
+OUTPUT:
+- No emojis
+- Use markdown formatting when helpful
+
+QUESTION CLASSIFICATION:
+- If question is RELATED to previous topic (follow-up, clarification, deeper dive): Answer IN CONTEXT
+- If question is COMPLETELY NEW (different topic): Answer independently
+- Let AI determine relationship based on topic similarity`;
+
+      const newUser = {
+        username: email.split('@')[0],
+        name,
+        email,
+        password: '', // No password for Google users
+        googleId,
+        picture,
+        verified: true, // AUTO-VERIFIED for Google sign-in
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        role: 'user',
+        plan: 'Free',
+        tokens: 10,
+        createdAt: new Date(),
+        apiKeys: {},
+        selectedProvider: '',
+        voiceProvider: 'default',
+        deepgramApiKey: '',
+        deepgramLanguage: 'multi',
+        deepgramKeyterms: '',
+        settings: {
+          basePrompt: DEFAULT_BASE_PROMPT,
+          responseLanguage: 'English',
+          basePromptSummary: '',
+          jobDescription: '',
+          jobDescriptionSummary: '',
+          companyInfo: '',
+          companyInfoSummary: '',
+          contextMessages: 5
+        },
+        shortcuts: {
+          toggleListen: { modifier: 'Control', key: '\\' },
+          analyzeScreen: { modifier: 'Control', key: ']' },
+          toggleOverlay: { modifier: 'Control', key: '\'' },
+          getAnswer: { modifier: 'Control', key: 'Enter' },
+          focusInput: { modifier: 'Alt', key: '' },
+          clearQuestion: { modifier: 'Control', key: 'Backspace' },
+          stopOrClear: { modifier: 'Control', key: 'Backspace' },
+          toggleBrowseAI: { modifier: 'Control', key: '[' }
+        }
+      };
+
+      const result = await users.insertOne(newUser);
+      user = { ...newUser, _id: result.insertedId };
+      console.log('✅ New user created via Google:', email);
+    }
+
+    // Build clean user object for frontend
+    const userIdStr = user._id.toString();
+
+    // Migrate old shortcut names to new names
+    let migratedShortcuts = user.shortcuts || {};
+    if (migratedShortcuts && typeof migratedShortcuts === 'object') {
+      const renameMap = {
+        startStopListen: 'toggleListen',
+        minimizeToggle: 'toggleOverlay',
+        focusQuestion: 'focusInput'
+      };
+      for (const [oldName, newName] of Object.entries(renameMap)) {
+        if (migratedShortcuts[oldName]) {
+          migratedShortcuts[newName] = migratedShortcuts[oldName];
+          delete migratedShortcuts[oldName];
+        }
+      }
+    }
+
+    const userForFrontend = {
+      _id: userIdStr,
+      username: user.username || '',
+      name: user.name || '',
+      email: user.email || '',
+      role: user.role || 'user',
+      plan: user.plan || 'Free',
+      tokens: user.tokens || 0,
+      selectedProvider: user.selectedProvider || '',
+      voiceProvider: user.voiceProvider || 'default',
+      deepgramApiKey: user.deepgramApiKey || '',
+      deepgramLanguage: user.deepgramLanguage || 'multi',
+      deepgramKeyterms: user.deepgramKeyterms || '',
+      apiKeys: user.apiKeys || {},
+      settings: user.settings || {},
+      shortcuts: migratedShortcuts,
+      picture: user.picture || ''
+    };
+
+    return {
+      success: true,
+      message: 'Google login successful',
+      user: userForFrontend
+    };
+  } catch (error) {
+    console.error('❌ Google login error:', error);
+    return {
+      success: false,
+      message: 'Google login failed: ' + error.message
+    };
+  }
+}
+
 module.exports = {
   registerUser,
   loginUser,
@@ -1104,6 +1304,7 @@ module.exports = {
   saveMessage,
   saveConversationHistory,
   getConversationHistory,
-  clearConversationHistory
+  clearConversationHistory,
+  googleLogin
 };
 

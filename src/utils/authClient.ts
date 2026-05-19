@@ -83,6 +83,10 @@ export const authClient = {
 
   resendVerification: async (email: string) => {
     return await authCall('auth-resend-verification', '/auth/resend-verification', { email }, 'POST');
+  },
+
+  googleLogin: async (credential: string) => {
+    return await authCall('auth-google-login', '/auth/google', { credential }, 'POST');
   }
 };
 

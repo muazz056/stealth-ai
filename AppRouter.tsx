@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import LandingPage from './pages/LandingPage';
@@ -11,16 +11,19 @@ import VerifyEmailPage from './pages/VerifyEmailPage';
 import SuperAdminPage from './pages/SuperAdminPage';
 import App from './App';
 import AuthPage from './components/AuthPage';
+import SignInPage from './pages/SignInPage';
 import { authClient } from './src/utils/authClient';
 import { messagesClient } from './src/utils/messagesClient';
 import { DarkModeProvider } from './src/context/DarkModeContext';
 import { API_CONFIG } from './src/config';
 
 const LS_USER_KEY = 'isa_current_user';
-const LS_FIRST_LAUNCH_KEY = 'isa_first_launch_done'; // Track if app has been launched before
+const LS_FIRST_LAUNCH_KEY = 'isa_first_launch_done';
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
-const AppRouter: React.FC = () => {
+// Inner component that has access to useNavigate
+const AppRouterContent: React.FC = () => {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -39,30 +42,23 @@ const AppRouter: React.FC = () => {
       const savedUser = localStorage.getItem(LS_USER_KEY);
       const hasLaunchedBefore = localStorage.getItem(LS_FIRST_LAUNCH_KEY);
       
-      // Show loader ONLY on first launch in Electron
       if (isElectron && !hasLaunchedBefore) {
         setShowSetupLoader(true);
         setSetupCountdown(8);
-        // Mark that first launch is complete
         localStorage.setItem(LS_FIRST_LAUNCH_KEY, 'true');
       }
       
       if (savedUser) {
         try {
           const user = JSON.parse(savedUser);
-          
-          // Set user immediately
           setCurrentUser(user);
           setIsAuthenticated(true);
           
-          // Validate in background (non-blocking)
           authClient.getUser(user._id).then((result) => {
             if (result && result.user) {
               const currentSaved = localStorage.getItem(LS_USER_KEY);
               if (currentSaved) {
                 const current = JSON.parse(currentSaved);
-                // Preserve any user-initiated changes made after this fetch started
-                // (language, keywords, etc.) — prevents stale server data from overwriting them
                 if (current.deepgramLanguage !== user.deepgramLanguage || current.deepgramKeyterms !== user.deepgramKeyterms) {
                   return;
                 }
@@ -83,12 +79,8 @@ const AppRouter: React.FC = () => {
     
     loadUser();
     
-    // Listen for token updates from App.tsx
     const handleTokenUpdate = (event: any) => {
       const { tokens } = event.detail;
-      console.log('🔄 Token update received in AppRouter:', tokens);
-      
-      // Update currentUser with new token count
       setCurrentUser((prevUser: any) => {
         if (!prevUser) return prevUser;
         const updatedUser = { ...prevUser, tokens };
@@ -97,12 +89,8 @@ const AppRouter: React.FC = () => {
       });
     };
     
-    // Listen for shortcut updates from App.tsx
     const handleShortcutUpdate = (event: any) => {
       const { shortcuts } = event.detail;
-      console.log('⌨️ Shortcut update received in AppRouter:', shortcuts);
-      
-      // Update currentUser with new shortcuts
       setCurrentUser((prevUser: any) => {
         if (!prevUser) return prevUser;
         const updatedUser = { ...prevUser, shortcuts };
@@ -120,15 +108,29 @@ const AppRouter: React.FC = () => {
     };
   }, []);
 
+  // Listen for auth success from SignInPage (custom event)
+  useEffect(() => {
+    const handleAuthEvent = (event: any) => {
+      const { user } = event.detail;
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      navigate('/service');
+    };
+    
+    window.addEventListener('user-auth-success', handleAuthEvent as EventListener);
+    return () => {
+      window.removeEventListener('user-auth-success', handleAuthEvent as EventListener);
+    };
+  }, [navigate]);
+
   const handleAuthSuccess = (user: any) => {
     setCurrentUser(user);
     setIsAuthenticated(true);
     localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
-    
-    // No loader after login/signup - loader only shows on first app launch
+    // Redirect to /service after successful auth
+    navigate('/service');
   };
 
-  // Setup countdown effect
   useEffect(() => {
     if (showSetupLoader && setupCountdown > 0) {
       const timer = setTimeout(() => {
@@ -136,7 +138,6 @@ const AppRouter: React.FC = () => {
       }, 1000);
       return () => clearTimeout(timer);
     } else if (showSetupLoader && setupCountdown === 0) {
-      // Hide loader after countdown
       setTimeout(() => {
         setShowSetupLoader(false);
       }, 500);
@@ -144,15 +145,13 @@ const AppRouter: React.FC = () => {
   }, [showSetupLoader, setupCountdown]);
 
   const handleLogout = () => {
-    // Clear provider context tracking for this user on logout
     if (currentUser) {
       localStorage.removeItem(`isa_providers_sent_context_${currentUser._id}`);
-      console.log('✅ Provider context cleared for user on logout:', currentUser._id);
     }
-    
     setCurrentUser(null);
     setIsAuthenticated(false);
     localStorage.removeItem(LS_USER_KEY);
+    navigate('/');
   };
 
   const handleNewSession = async () => {
@@ -162,123 +161,77 @@ const AppRouter: React.FC = () => {
 
   const confirmNewSession = async () => {
     setShowConfirmModal(false);
-    
     try {
-      console.log('🧹 Clearing session for user:', currentUser._id);
-      
-      // Clear conversation history from MongoDB
       const result = await messagesClient.clearHistory(currentUser._id);
-      console.log('✅ Clear history result:', result);
-      
-      // Reset conversation context AND clear all summaries (fresh start)
-      // PRESERVE: apiKeys (permanent), CV, Base Prompt, Response Language
       const resetSettings = {
         ...(currentUser.settings || {}),
         jobDescription: '',
         companyInfo: '',
-        // Clear ALL summaries on New Session (fresh start)
         jobDescriptionSummary: '',
         companyInfoSummary: '',
-        // Keep CV, Base Prompt, and Response Language (they're reusable)
         cvSummary: currentUser.settings?.cvSummary || '',
         basePromptSummary: currentUser.settings?.basePromptSummary || '',
         cvText: currentUser.settings?.cvText || '',
         basePrompt: currentUser.settings?.basePrompt || '',
         responseLanguage: currentUser.settings?.responseLanguage || 'English',
         contextMessages: currentUser.settings?.contextMessages ?? 5,
-        // PRESERVE API KEYS (they should never be reset)
         apiKeys: currentUser.settings?.apiKeys || {}
       };
       
-      console.log('🔄 Resetting settings in MongoDB:', resetSettings);
       await authClient.updateSettings(currentUser._id, resetSettings);
       
-      // Also reset deepgramKeyterms (optional field, reset on new session)
       try {
         await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: currentUser._id, deepgramKeyterms: '' })
         });
-        console.log('🔑 Deepgram keyterms reset to empty');
-      } catch (e) {
-        console.error('Failed to reset keyterms:', e);
-      }
-      
-      // Update current user object
-      const updatedUser = {
-        ...currentUser,
-        deepgramKeyterms: '', // Reset keyterms on new session (optional field)
-        settings: {
-          ...currentUser.settings,
-          ...resetSettings
-        }
-      };
+      } catch (e) {}
+
+      const updatedUser = { ...currentUser, deepgramKeyterms: '', settings: { ...currentUser.settings, ...resetSettings } };
       setCurrentUser(updatedUser);
       localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-      
-      // Clear localStorage conversation data
       localStorage.removeItem('isa_chat_history');
       localStorage.setItem('isa_job_description', '');
       localStorage.setItem('isa_company_info', '');
-      
-      // RESET PROVIDERS CONTEXT STATE FOR THIS USER (so context can be sent again)
       localStorage.removeItem(`isa_providers_sent_context_${currentUser._id}`);
-      console.log('✅ Providers context state reset for user:', currentUser._id);
-      
-      // Show success message
       setShowSuccessModal(true);
-      
-      // Close success modal and force App component to re-render with cleared state
       setTimeout(() => {
         setShowSuccessModal(false);
-        // Increment session key to force App component to remount with fresh state
         setSessionKey(prev => prev + 1);
       }, 1500);
     } catch (error) {
-      console.error('❌ Failed to clear session:', error);
       setShowErrorModal(true);
     }
   };
 
   return (
-    <DarkModeProvider>
-      <HashRouter>
-      {/* Setup Loader with Progress Bar */}
+    <>
       {showSetupLoader && (
         <div className="fixed inset-0 bg-white dark:bg-slate-950 flex items-center justify-center z-[10000] transition-colors duration-300">
           <div className="flex flex-col items-center gap-8">
-            {/* Animated spinner */}
             <div className="relative">
               <div className="w-32 h-32 border-8 border-blue-500/10 dark:border-blue-500/20 rounded-full absolute"></div>
               <div className="w-32 h-32 border-8 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              {/* Center icon instead of number */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-6xl animate-pulse">⚡</div>
               </div>
             </div>
-            
-            {/* Setup text */}
             <div className="text-center space-y-3">
               <h3 className="text-3xl font-black text-black dark:text-white tracking-tight">Setting Up Your Workspace</h3>
               <p className="text-slate-600 dark:text-slate-400 text-base">Loading AI assistant, configuring settings...</p>
             </div>
-            
-            {/* Loading bar with percentage */}
             <div className="w-80 space-y-2">
               <div className="flex justify-between text-sm text-slate-500">
                 <span>Initializing...</span>
                 <span>{Math.round(((8 - setupCountdown) / 8) * 100)}%</span>
               </div>
               <div className="w-full h-3 bg-slate-200 dark:bg-slate-800/50 rounded-full overflow-hidden border border-slate-300 dark:border-slate-700/50">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-1000 ease-linear shadow-lg shadow-blue-500/50"
+                <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-1000 ease-linear shadow-lg shadow-blue-500/50"
                   style={{ width: `${((8 - setupCountdown) / 8) * 100}%` }}
                 ></div>
               </div>
             </div>
-            
-            {/* Loading stages text */}
             <div className="text-center">
               <p className="text-xs text-slate-500 dark:text-slate-600 font-mono">
                 {setupCountdown > 6 ? '🔧 Loading modules...' :
@@ -311,18 +264,8 @@ const AppRouter: React.FC = () => {
               </ul>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="flex-1 px-6 py-3 bg-slate-200 dark:bg-slate-700/60 hover:bg-slate-300 dark:hover:bg-slate-600/80 backdrop-blur-sm text-black dark:text-white rounded-lg font-bold transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmNewSession}
-                className="flex-1 px-6 py-3 bg-blue-600 dark:bg-blue-600/80 hover:bg-blue-700 dark:hover:bg-blue-600 backdrop-blur-sm text-white rounded-lg font-bold transition-all"
-              >
-                Start New Session
-              </button>
+              <button onClick={() => setShowConfirmModal(false)} className="flex-1 px-6 py-3 bg-slate-200 dark:bg-slate-700/60 hover:bg-slate-300 dark:hover:bg-slate-600/80 backdrop-blur-sm text-black dark:text-white rounded-lg font-bold transition-all">Cancel</button>
+              <button onClick={confirmNewSession} className="flex-1 px-6 py-3 bg-blue-600 dark:bg-blue-600/80 hover:bg-blue-700 dark:hover:bg-blue-600 backdrop-blur-sm text-white rounded-lg font-bold transition-all">Start New Session</button>
             </div>
           </div>
         </div>
@@ -350,12 +293,7 @@ const AppRouter: React.FC = () => {
               <h3 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-2">Error</h3>
               <p className="text-slate-700 dark:text-slate-200 text-sm">Failed to start new session. Please try again.</p>
             </div>
-            <button
-              onClick={() => setShowErrorModal(false)}
-              className="w-full px-6 py-3 bg-red-600 dark:bg-red-600/80 hover:bg-red-700 dark:hover:bg-red-600 backdrop-blur-sm text-white rounded-lg font-bold transition-all"
-            >
-              Close
-            </button>
+            <button onClick={() => setShowErrorModal(false)} className="w-full px-6 py-3 bg-red-600 dark:bg-red-600/80 hover:bg-red-700 dark:hover:bg-red-600 backdrop-blur-sm text-white rounded-lg font-bold transition-all">Close</button>
           </div>
         </div>
       )}
@@ -364,28 +302,17 @@ const AppRouter: React.FC = () => {
         {/* Electron: Skip landing pages, go straight to app */}
         {isElectron ? (
           <>
-            {/* For Electron, only show app, auth, and admin routes */}
             <Route
               path="/admin/settings"
               element={
                 isAuthenticated ? (
                   <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
-                    <Navbar 
-                      user={currentUser} 
-                      onLogout={handleLogout}
-                      showAllLinks={true}
-                    />
-                    <div className="flex-grow">
-                      <SuperAdminPage user={currentUser} />
-                    </div>
+                    <Navbar user={currentUser} onLogout={handleLogout} showAllLinks={true} />
+                    <div className="flex-grow"><SuperAdminPage user={currentUser} /></div>
                     <Footer />
                   </div>
                 ) : (
-                  <>
-                    <Navbar user={currentUser} onLogout={handleLogout} />
-                    <AuthPage onAuthSuccess={handleAuthSuccess} />
-                    <Footer />
-                  </>
+                  <AuthPage onAuthSuccess={handleAuthSuccess} />
                 )
               }
             />
@@ -394,13 +321,7 @@ const AppRouter: React.FC = () => {
               element={
                 isAuthenticated ? (
                   <div className="min-h-screen bg-white dark:bg-slate-950 transition-colors duration-300">
-                    <Navbar 
-                      user={currentUser} 
-                      onLogout={handleLogout}
-                      onNewSession={handleNewSession}
-                      showSessionButton={true}
-                      isElectron={true}
-                    />
+                    <Navbar user={currentUser} onLogout={handleLogout} onNewSession={handleNewSession} showSessionButton={true} isElectron={true} />
                     <App key={sessionKey} user={currentUser} onLogout={handleLogout} onNewSession={handleNewSession} />
                   </div>
                 ) : (
@@ -411,84 +332,33 @@ const AppRouter: React.FC = () => {
           </>
         ) : (
           <>
-            {/* Web App: Show full landing page and marketing routes */}
-            <Route
-              path="/"
-              element={
-                <>
-                  <Navbar user={currentUser} onLogout={handleLogout} />
-                  <LandingPage />
-                </>
-              }
-            />
-            <Route
-              path="/features"
-              element={
-                <>
-                  <Navbar user={currentUser} onLogout={handleLogout} />
-                  <FeaturesPage />
-                </>
-              }
-            />
-            <Route
-              path="/about"
-              element={
-                <>
-                  <Navbar user={currentUser} onLogout={handleLogout} />
-                  <AboutPage />
-                </>
-              }
-            />
-            <Route
-              path="/contact"
-              element={
-                <>
-                  <Navbar user={currentUser} onLogout={handleLogout} />
-                  <ContactPage />
-                </>
-              }
-            />
-            <Route
-              path="/pricing"
-              element={
-                <>
-                  <Navbar user={currentUser} onLogout={handleLogout} />
-                  <PricingPage />
-                  <Footer />
-                </>
-              }
-            />
+            {/* Web App Routes */}
+            <Route path="/" element={<><Navbar user={currentUser} onLogout={handleLogout} /><LandingPage /></>} />
+            <Route path="/features" element={<><Navbar user={currentUser} onLogout={handleLogout} /><FeaturesPage /></>} />
+            <Route path="/about" element={<><Navbar user={currentUser} onLogout={handleLogout} /><AboutPage /></>} />
+            <Route path="/contact" element={<><Navbar user={currentUser} onLogout={handleLogout} /><ContactPage /></>} />
+            <Route path="/pricing" element={<><Navbar user={currentUser} onLogout={handleLogout} /><PricingPage /><Footer /></>} />
+
+            {/* Dedicated Sign In / Sign Up page */}
+            <Route path="/signin" element={<SignInPage />} />
 
             {/* Email Verification */}
-            <Route
-              path="/verify-email"
-              element={<VerifyEmailPage />}
-            />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-            {/* Protected route - Interview App */}
+            {/* Protected route - Interview App - redirects to /signin if not authenticated */}
             <Route
               path="/service"
               element={
                 isAuthenticated ? (
                   <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
-                    <Navbar 
-                      user={currentUser} 
-                      onLogout={handleLogout}
-                      onNewSession={handleNewSession}
-                      showSessionButton={true}
-                      showAllLinks={true}
-                    />
+                    <Navbar user={currentUser} onLogout={handleLogout} onNewSession={handleNewSession} showSessionButton={true} showAllLinks={true} />
                     <div className="flex-grow">
                       <App key={sessionKey} user={currentUser} onLogout={handleLogout} onNewSession={handleNewSession} />
                     </div>
                     <Footer />
                   </div>
                 ) : (
-                  <>
-                    <Navbar user={currentUser} onLogout={handleLogout} />
-                    <AuthPage onAuthSuccess={handleAuthSuccess} />
-                    <Footer />
-                  </>
+                  <Navigate to="/signin" replace />
                 )
               }
             />
@@ -499,22 +369,12 @@ const AppRouter: React.FC = () => {
               element={
                 isAuthenticated ? (
                   <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col transition-colors duration-300">
-                    <Navbar 
-                      user={currentUser} 
-                      onLogout={handleLogout}
-                      showAllLinks={true}
-                    />
-                    <div className="flex-grow">
-                      <SuperAdminPage user={currentUser} />
-                    </div>
+                    <Navbar user={currentUser} onLogout={handleLogout} showAllLinks={true} />
+                    <div className="flex-grow"><SuperAdminPage user={currentUser} /></div>
                     <Footer />
                   </div>
                 ) : (
-                  <>
-                    <Navbar user={currentUser} onLogout={handleLogout} />
-                    <AuthPage onAuthSuccess={handleAuthSuccess} />
-                    <Footer />
-                  </>
+                  <Navigate to="/signin" replace />
                 )
               }
             />
@@ -524,10 +384,18 @@ const AppRouter: React.FC = () => {
           </>
         )}
       </Routes>
-    </HashRouter>
+    </>
+  );
+};
+
+const AppRouter: React.FC = () => {
+  return (
+    <DarkModeProvider>
+      <BrowserRouter>
+        <AppRouterContent />
+      </BrowserRouter>
     </DarkModeProvider>
   );
 };
 
 export default AppRouter;
-

@@ -3239,7 +3239,7 @@ Respond in ${langDisplay}.]`;
           label: 'View Pricing',
           onClick: () => {
             setShowOutOfTokensModal(false);
-            window.location.hash = '#/pricing';
+            window.location.href = '/pricing';
           }
         }}
         secondaryAction={{

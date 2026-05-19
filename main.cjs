@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -909,6 +909,23 @@ ipcMain.handle('auth-resend-verification', async (event, data) => {
     }
 });
 
+// Google OAuth Login via WebView (Frontend sends credential token)
+ipcMain.handle('auth-google-login', async (event, data) => {
+    console.log('🎯 IPC: auth-google-login received');
+    if (!authModule) {
+        return { success: false, message: 'Auth module not available' };
+    }
+    try {
+        const credential = typeof data === 'string' ? data : data.credential;
+        const result = await authModule.googleLogin(credential);
+        console.log('📤 IPC: Google login result:', result.success ? 'Success' : 'Failed');
+        return result;
+    } catch (error) {
+        console.error('❌ IPC error:', error);
+        return { success: false, message: error.message };
+    }
+});
+
 function createMainWindow() {
     mainWindow = new BrowserWindow({
         width: 800,
@@ -1041,12 +1058,26 @@ function createMainWindow() {
       console.log('📂 FINAL Loading from:', indexPath);
       mainWindow.loadFile(indexPath, { hash: '/service', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      mainWindow.loadURL(`${FRONTEND_URL}/#/service${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
+      mainWindow.loadURL(`${FRONTEND_URL}/service${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
         console.error('Failed to load main window:', errorCode, errorDescription);
+    });
+
+    // Open external links in system browser (not inside Electron)
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        shell.openExternal(url);
+        return { action: 'deny' };
+    });
+
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        const isInternal = url.startsWith('file://') || url.includes('localhost:5173');
+        if (!isInternal) {
+            event.preventDefault();
+            shell.openExternal(url);
+        }
     });
 
     mainWindow.on('closed', () => {
@@ -1385,12 +1416,26 @@ function createOverlayWindow() {
       console.log('📂 Loading overlay from:', overlayIndexPath);
       overlay.loadFile(overlayIndexPath, { hash: '/overlay', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      overlay.loadURL(`${FRONTEND_URL}/#/overlay${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
+      overlay.loadURL(`${FRONTEND_URL}/overlay${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
     overlay.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
         console.error('Failed to load overlay:', errorCode, errorDescription);
+    });
+
+    // Open external links in system browser (not inside overlay)
+    overlay.webContents.setWindowOpenHandler(({ url }) => {
+        shell.openExternal(url);
+        return { action: 'deny' };
+    });
+
+    overlay.webContents.on('will-navigate', (event, url) => {
+        const isInternal = url.startsWith('file://') || url.includes('localhost:5173');
+        if (!isInternal) {
+            event.preventDefault();
+            shell.openExternal(url);
+        }
     });
     
     // Ensure microphone permissions are granted when overlay loads

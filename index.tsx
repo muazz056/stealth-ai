@@ -6,7 +6,7 @@ import AppRouter from './AppRouter';
 import OverlayApp from './OverlayApp';
 
 // Check if we're in overlay mode based on URL hash
-const isOverlayMode = window.location.hash === '#/overlay';
+const isOverlayMode = window.location.pathname === '/overlay';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

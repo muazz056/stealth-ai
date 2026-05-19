@@ -79,7 +79,7 @@ async function sendVerificationEmail(email, token, username) {
     ? process.env.VITE_BACKEND_URL
     : (process.env.API_BASE_URL || 'http://localhost:3001');
   
-  const verificationLink = `${frontendUrl}/#/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
+  const verificationLink = `${frontendUrl}/verify-email?token=${token}&backend=${encodeURIComponent(backendUrl)}`;
 
   const emailData = JSON.stringify({
     sender: { email: senderEmail, name: 'Stealth AI' },
@@ -890,6 +890,189 @@ app.put('/api/auth/api-key', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update API key: ' + error.message
+    });
+  }
+});
+
+// Google OAuth Login (sign-in with Google, auto-verified)
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google credential is required'
+      });
+    }
+
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        success: false,
+        message: 'Google OAuth is not configured on the server'
+      });
+    }
+
+    const { OAuth2Client } = require('google-auth-library');
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+    // Verify the Google ID token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload['sub'];
+    const email = payload['email'];
+    const name = payload['name'] || email.split('@')[0];
+    const picture = payload['picture'] || '';
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'No email returned from Google'
+      });
+    }
+
+    console.log('✅ Google login verified for:', email);
+
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    // Check if user already exists
+    let user = await users.findOne({ email });
+
+    if (user) {
+      // Update googleId + picture if not set, and ensure verified
+      const updates = { picture, name };
+      if (!user.googleId) updates.googleId = googleId;
+      if (!user.verified) updates.verified = true;
+
+      await users.updateOne(
+        { _id: user._id },
+        { $set: updates }
+      );
+    } else {
+      // Create new user with auto-verified = true
+      const newUser = {
+        username: email.split('@')[0],
+        name,
+        email,
+        password: '',
+        googleId,
+        picture,
+        verified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        role: 'user',
+        plan: 'Free',
+        tokens: 10,
+        createdAt: new Date(),
+        apiKeys: {},
+        selectedProvider: '',
+        voiceProvider: 'default',
+        deepgramApiKey: '',
+        deepgramLanguage: 'multi',
+        deepgramKeyterms: '',
+        settings: {
+          basePrompt: `You are a real-time AI assistant built for live conversations.
+
+CONTEXT RULES:
+1. Document = single source of truth
+- Use mentioned skills, experience, projects, education
+- NEVER invent, exaggerate, or assume
+2. Description provided = align answers directly to it
+3. Info provided = tailor responses accordingly
+4. No context = use best practices
+
+ANSWER STRUCTURE:
+- Professional, confident tone , important information first
+
+TRANSCRIPTION ROBUSTNESS:
+- Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
+- Intelligently analyze intent using provided context
+
+CLARIFICATION:
+- If multiple interpretations possible:
+- Choose most likely one based on context (Job description or resume)
+- Answer directly without asking clarifying questions or mentioning in the response.
+
+RESPONSE BEHAVIOR:
+- Do NOT mention transcription errors or corrections
+- Do NOT explain correction process
+- Never mention you are AI or language model
+- Answer confidently as if question was clearly spoken
+
+CODING/TECHNICAL QUESTIONS:
+- Provide correct, clean code or technical explanation
+- Explain each approach if necessary
+
+EXAMPLES:
+- Give examples to improve clarity
+
+OUTPUT:
+- No emojis
+- Use markdown formatting when helpful
+
+QUESTION CLASSIFICATION:
+- If question is RELATED to previous topic (follow-up, clarification, deeper dive): Answer IN CONTEXT
+- If question is COMPLETELY NEW (different topic): Answer independently
+- Let AI determine relationship based on topic similarity`,
+          responseLanguage: 'English',
+          basePromptSummary: '',
+          jobDescription: '',
+          jobDescriptionSummary: '',
+          companyInfo: '',
+          companyInfoSummary: '',
+          contextMessages: 5
+        },
+        shortcuts: {
+          toggleListen: { modifier: 'Control', key: '\\' },
+          analyzeScreen: { modifier: 'Control', key: ']' },
+          toggleOverlay: { modifier: 'Control', key: '\'' },
+          getAnswer: { modifier: 'Control', key: 'Enter' },
+          focusInput: { modifier: 'Alt', key: '' },
+          clearQuestion: { modifier: 'Control', key: 'Backspace' },
+          stopOrClear: { modifier: 'Control', key: 'Backspace' },
+          toggleBrowseAI: { modifier: 'Control', key: '[' }
+        }
+      };
+
+      const result = await users.insertOne(newUser);
+      user = { ...newUser, _id: result.insertedId };
+      console.log('✅ New user created via Google:', email);
+    }
+
+    // Build clean user object for frontend
+    const { password: _, ...userWithoutPassword } = user;
+
+    // Migrate old shortcut names to new names
+    if (userWithoutPassword.shortcuts && typeof userWithoutPassword.shortcuts === 'object') {
+      const renameMap = {
+        startStopListen: 'toggleListen',
+        minimizeToggle: 'toggleOverlay',
+        focusQuestion: 'focusInput'
+      };
+      for (const [oldName, newName] of Object.entries(renameMap)) {
+        if (userWithoutPassword.shortcuts[oldName]) {
+          userWithoutPassword.shortcuts[newName] = userWithoutPassword.shortcuts[oldName];
+          delete userWithoutPassword.shortcuts[oldName];
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Google login successful',
+      user: { ...userWithoutPassword, picture }
+    });
+  } catch (error) {
+    console.error('❌ Google login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Google login failed: ' + error.message
     });
   }
 });

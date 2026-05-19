@@ -19,31 +19,31 @@ interface StealthModalProps {
 
 const variantStyles = {
   info: {
-    border: 'border-blue-500/60',
-    iconColor: 'text-blue-400',
+    border: 'border-blue-500/60 dark:border-blue-500/60',
+    iconColor: 'text-blue-400 dark:text-blue-400',
     gradient: 'from-blue-600 to-indigo-600',
-    titleColor: 'text-blue-300',
+    titleColor: 'text-blue-600 dark:text-blue-300',
     shadowColor: 'shadow-blue-500/20'
   },
   success: {
-    border: 'border-emerald-500/60',
-    iconColor: 'text-emerald-400',
+    border: 'border-emerald-500/60 dark:border-emerald-500/60',
+    iconColor: 'text-emerald-400 dark:text-emerald-400',
     gradient: 'from-emerald-600 to-green-600',
-    titleColor: 'text-emerald-300',
+    titleColor: 'text-emerald-600 dark:text-emerald-300',
     shadowColor: 'shadow-emerald-500/20'
   },
   error: {
-    border: 'border-red-500/60',
-    iconColor: 'text-red-400',
+    border: 'border-red-500/60 dark:border-red-500/60',
+    iconColor: 'text-red-400 dark:text-red-400',
     gradient: 'from-red-600 to-rose-600',
-    titleColor: 'text-red-300',
+    titleColor: 'text-red-600 dark:text-red-300',
     shadowColor: 'shadow-red-500/20'
   },
   warning: {
-    border: 'border-amber-500/60',
-    iconColor: 'text-amber-400',
+    border: 'border-amber-500/60 dark:border-amber-500/60',
+    iconColor: 'text-amber-400 dark:text-amber-400',
     gradient: 'from-amber-600 to-orange-600',
-    titleColor: 'text-amber-300',
+    titleColor: 'text-amber-600 dark:text-amber-300',
     shadowColor: 'shadow-amber-500/20'
   }
 };
@@ -82,7 +82,7 @@ const StealthModal: React.FC<StealthModalProps> = ({
       onClick={onClose}
     >
       <div
-        className={`relative w-full max-w-md bg-slate-900/95 backdrop-blur-xl border ${styles.border} rounded-2xl p-8 shadow-2xl ${styles.shadowColor} transform transition-all duration-200 scale-100`}
+        className={`relative w-full max-w-md bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border ${styles.border} rounded-2xl p-8 shadow-2xl ${styles.shadowColor} transform transition-all duration-200 scale-100`}
         onClick={(e) => e.stopPropagation()}
       >
         {icon && (
@@ -95,7 +95,7 @@ const StealthModal: React.FC<StealthModalProps> = ({
             {title}
           </h3>
         )}
-        <div className="text-slate-300 text-sm leading-relaxed mb-7 text-center">
+        <div className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-7 text-center">
           {children}
         </div>
         <div className="flex flex-col gap-3">
@@ -110,7 +110,7 @@ const StealthModal: React.FC<StealthModalProps> = ({
           {secondaryAction && (
             <button
               onClick={secondaryAction.onClick}
-              className="w-full px-6 py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all duration-200 bg-slate-800/50 border border-slate-600 hover:border-blue-500/50 text-slate-300 hover:text-white hover:scale-[1.02] active:scale-[0.98]"
+              className="w-full px-6 py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all duration-200 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-600 hover:border-blue-500/50 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:scale-[1.02] active:scale-[0.98]"
             >
               {secondaryAction.label}
             </button>

@@ -1,9 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { authClient } from '../src/utils/authClient';
 import StealthModal from './StealthModal';
 
 interface AuthPageProps {
   onAuthSuccess: (user: any) => void;
+}
+
+// Declare google global type
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          renderButton: (element: HTMLElement, options: any) => void;
+          prompt: (momentListener?: (notification: any) => void) => void;
+          cancel: () => void;
+        };
+      };
+    };
+  }
 }
 
 // Password validation hook
@@ -46,6 +62,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   
   const [isLogin, setIsLogin] = useState(true);
   const [showResendForm, setShowResendForm] = useState(false);
+  const effectiveIsLogin = isElectron ? true : isLogin;
   const [formData, setFormData] = useState({
     username: '',
     name: '',
@@ -62,10 +79,72 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   const [resendMessage, setResendMessage] = useState('');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  // Initialize Google One Tap
+  useEffect(() => {
+    // Check if Google client ID is available and we're in a browser (not Electron)
+    const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!GOOGLE_CLIENT_ID || isElectron) return;
+
+    // Load Google Identity Services script
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if (window.google && googleButtonRef.current) {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleCredentialResponse,
+          auto_select: false,
+          cancel_on_tap_outside: false,
+        });
+        // Render the Google Sign-In button
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: 'standard',
+          shape: 'pill',
+          theme: 'outline',
+          text: 'continue_with',
+          size: 'large',
+          logo_alignment: 'left',
+          width: '100%'
+        });
+      }
+    };
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup
+      const scriptTag = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+      if (scriptTag) document.head.removeChild(scriptTag);
+    };
+  }, []);
+
+  const handleGoogleCredentialResponse = async (response: any) => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      const result = await authClient.googleLogin(response.credential);
+      
+      if (result.success) {
+        onAuthSuccess(result.user);
+      } else {
+        setError(result.message || 'Google login failed');
+      }
+    } catch (err: any) {
+      setError('Google login failed: ' + err.message);
+      console.error('Google auth error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const { strength, rules } = usePasswordStrength(formData.password);
 
   const isPasswordValid = () => {
-    if (isLogin) return true;
+    if (effectiveIsLogin) return true;
     return rules.length && rules.uppercase && rules.lowercase && rules.number;
   };
 
@@ -73,13 +152,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     e.preventDefault();
     setError('');
 
-    if (!isLogin && formData.password !== formData.confirmPassword) {
+    if (!effectiveIsLogin && formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       return;
     }
 
     // Frontend password validation (signup only)
-    if (!isLogin && !isPasswordValid()) {
+    if (!effectiveIsLogin && !isPasswordValid()) {
       setError('Please ensure your password meets all requirements');
       return;
     }
@@ -87,7 +166,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     setLoading(true);
 
     try {
-      if (isLogin) {
+      if (effectiveIsLogin) {
         // Login
         const result = await authClient.login(formData.username, formData.password);
 
@@ -166,7 +245,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               Interview <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-500">Assist</span>
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
-              {isLogin ? '🔐 Sign in to your account' : '✨ Create your account'}
+              {effectiveIsLogin ? (
+                isElectron ? '🔐 Sign in to your desktop account' : '🔐 Sign in to your account'
+              ) : '✨ Create your account'}
             </p>
           </div>
 
@@ -180,12 +261,25 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
           </div>
         )}
 
+        {/* Google Sign-In Button (only for web/browser, not Electron) */}
+        {!isElectron && (
+          <div className="mb-6">
+            <div ref={googleButtonRef} className="flex justify-center w-full"></div>
+            {/* Divider */}
+            <div className="flex items-center my-4">
+              <div className="flex-1 border-t border-slate-300 dark:border-slate-600"></div>
+              <span className="px-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">or</span>
+              <div className="flex-1 border-t border-slate-300 dark:border-slate-600"></div>
+            </div>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Username or Email (Login) / Username (Signup) */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-              {isLogin ? 'Username or Email' : 'Username'}
+              {effectiveIsLogin ? 'Username or Email' : 'Username'}
             </label>
             <input
               type="text"
@@ -193,12 +287,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               required
               className="w-full bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-600/50 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              placeholder={isLogin ? "Enter username or email" : "Enter username"}
+              placeholder={effectiveIsLogin ? "Enter username or email" : "Enter username"}
             />
           </div>
 
           {/* Name (Signup only) */}
-          {!isLogin && (
+          {!effectiveIsLogin && (
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
                 Full Name
@@ -215,7 +309,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
           )}
 
           {/* Email (Signup only) */}
-          {!isLogin && (
+          {!effectiveIsLogin && (
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
                 Email
@@ -264,7 +358,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             </div>
 
             {/* Password Strength Bar (Signup only) */}
-            {!isLogin && (
+            {!effectiveIsLogin && (
               <div className="mt-3 space-y-2">
                 {/* Strength Bar */}
                 <div className="flex gap-1">
@@ -308,7 +402,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
           </div>
 
           {/* Confirm Password (Signup only) */}
-          {!isLogin && (
+          {!effectiveIsLogin && (
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
                 Confirm Password
@@ -356,7 +450,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                 </svg>
                 Processing...
               </span>
-            ) : isLogin ? (
+            ) : effectiveIsLogin ? (
               '🔓 Sign In'
             ) : (
               '✨ Create Account'
@@ -366,29 +460,31 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
         {/* Toggle Login/Signup */}
         <div className="mt-8 text-center space-y-2">
-          <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setError('');
-              setShowResendForm(false);
-              setFormData({
-                username: '',
-                name: '',
-                email: '',
-                password: '',
-                confirmPassword: ''
-              });
-            }}
-            className="text-sm text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors"
-          >
-            {isLogin ? "Don't have an account? " : 'Already have an account? '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 font-bold hover:from-blue-700 hover:to-indigo-700 dark:hover:from-blue-300 dark:hover:to-indigo-300">
-              {isLogin ? 'Sign Up' : 'Sign In'}
-            </span>
-          </button>
+          {!isElectron && (
+            <button
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError('');
+                setShowResendForm(false);
+                setFormData({
+                  username: '',
+                  name: '',
+                  email: '',
+                  password: '',
+                  confirmPassword: ''
+                });
+              }}
+              className="text-sm text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors"
+            >
+              {effectiveIsLogin ? "Don't have an account? " : 'Already have an account? '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 font-bold hover:from-blue-700 hover:to-indigo-700 dark:hover:from-blue-300 dark:hover:to-indigo-300">
+                {effectiveIsLogin ? 'Sign Up' : 'Sign In'}
+              </span>
+            </button>
+          )}
 
           {/* Resend Verification Link */}
-          {isLogin && (
+          {effectiveIsLogin && !isElectron && (
             <div>
               <button
                 onClick={() => {
@@ -402,10 +498,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               </button>
             </div>
           )}
+
+          {/* Desktop-only message */}
+          {isElectron && (
+            <div className="pt-2">
+              <p className="text-xs text-slate-500 dark:text-slate-500">
+                To create an account, please visit{' '}
+                <a
+                  href="https://stealth-ai-sand.vercel.app"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
+                  stealth-ai-sand.vercel.app
+                </a>
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Resend Verification Form */}
-        {showResendForm && (
+        {showResendForm && !isElectron && (
           <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-800/50 rounded-xl border border-slate-300 dark:border-slate-700">
             <h3 className="text-sm font-bold text-black dark:text-white mb-2">Resend Verification Email</h3>
             <div className="space-y-3">
