@@ -103,7 +103,7 @@ const LandingPage: React.FC = () => {
               </div>
               <div className="flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800/30 backdrop-blur-sm rounded-lg px-4 py-2">
                 <span className="text-green-500 text-xl">✓</span>
-                <span>10 Free Tokens</span>
+                <span>15 Free Credits</span>
               </div>
               <div className="flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800/30 backdrop-blur-sm rounded-lg px-4 py-2">
                 <span className="text-green-500 text-xl">✓</span>

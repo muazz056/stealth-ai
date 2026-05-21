@@ -222,6 +222,9 @@ const OverlayApp: React.FC = () => {
   const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
+
+  const transcriptionStartTimeRef = useRef<number>(0);
+  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500);
   
   // Track which providers have received context (persists per user)
   const [providersSentContext, setProvidersSentContext] = useState<Set<string>>(() => {
@@ -702,6 +705,9 @@ const OverlayApp: React.FC = () => {
         localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
         const s = freshUser.settings || {};
         setOverlayUserSettings(s);
+        // Initialize transcription remaining
+        const trSeconds = freshUser.transcriptionSeconds || 0;
+        setTranscriptionSecondsRemaining(Math.max(0, 1500 - trSeconds));
         if (freshUser.deepgramLanguage) setCurrentLanguage(freshUser.deepgramLanguage);
         if (freshUser.deepgramKeyterms !== undefined) setCurrentKeyterms(freshUser.deepgramKeyterms);
         if (s.cvSummary) localStorage.setItem('isa_cv_summary', s.cvSummary);
@@ -1462,6 +1468,30 @@ const OverlayApp: React.FC = () => {
     }
     isStartedRef.current = true;
 
+    // Check transcription limits before starting
+    const userForListen = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+    const isAdminUser = userForListen.role === 'admin' || userForListen.role === 'super-admin' || userForListen.tokens === -1;
+    if (!isAdminUser) {
+      const listenCheck = await tokensClient.checkListen(userForListen._id || '');
+      if (!listenCheck.canListen) {
+        isStartedRef.current = false;
+        if (listenCheck.reason === 'out_of_tokens') {
+          setShowOutOfTokensModal(true);
+        } else if (listenCheck.reason === 'transcription_limit') {
+          setModalInfo({
+            title: 'Transcription Limit Reached',
+            message: 'You have used all 25 minutes of free transcription. Upgrade to Pro for unlimited transcription.',
+            variant: 'warning',
+            icon: '🎤'
+          });
+        }
+        return;
+      }
+    }
+
+    // Record start time for tracking
+    transcriptionStartTimeRef.current = Date.now();
+
     overlayLog('handleStartListen called', {
       isElectron: isElectronRef.current,
       provider: currentVoiceProvider,
@@ -1830,6 +1860,28 @@ const OverlayApp: React.FC = () => {
 
   const handleStopListen = () => {
     wantToListenRef.current = false;
+
+    // Track transcription time
+    if (transcriptionStartTimeRef.current > 0) {
+      const elapsed = Math.floor((Date.now() - transcriptionStartTimeRef.current) / 1000);
+      transcriptionStartTimeRef.current = 0;
+      if (elapsed > 0) {
+        const userForTime = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+        const isAdminUser = userForTime.role === 'admin' || userForTime.role === 'super-admin' || userForTime.tokens === -1;
+        if (!isAdminUser && userForTime._id) {
+          tokensClient.addTranscriptionTime(userForTime._id, elapsed).then(result => {
+            if (result.success) {
+              setTranscriptionSecondsRemaining(result.transcriptionRemaining);
+              // Update user in localStorage
+              const current = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+              current.transcriptionSeconds = result.transcriptionSeconds;
+              localStorage.setItem(LS_USER_KEY, JSON.stringify(current));
+            }
+          }).catch(err => console.error('Failed to add transcription time:', err));
+        }
+      }
+    }
+
     if (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current) {
       const currentText = transcribedText.trim();
       isStartedRef.current = false;
@@ -2291,25 +2343,6 @@ Respond in ${langDisplay}.]`
 
   // Analyze Screen (silent screenshot + AI vision)
   const handleAnalyzeScreen = async () => {
-    const userStr = localStorage.getItem(LS_USER_KEY);
-    if (userStr) {
-      try {
-        const currentUser = JSON.parse(userStr);
-        const plan = (currentUser.plan || '').toLowerCase();
-        const role = (currentUser.role || '').toLowerCase();
-        const hasAccess = ['pro', 'premium', 'lifetime'].includes(plan) || ['admin', 'super-admin'].includes(role);
-        if (!hasAccess) {
-          setShowUpgradeModal(true);
-          return;
-        }
-      } catch (e) {
-        console.error('❌ [AnalyzeScreen] Failed to parse user:', e);
-      }
-    } else {
-      setShowUpgradeModal(true);
-      return;
-    }
-    
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
       
@@ -2930,45 +2963,29 @@ ${companyInfoSummary}`;
           
 
 
-          {(() => {
-            const _uStr = localStorage.getItem(LS_USER_KEY);
-            let _isFreeAS = true;
-            if (_uStr) {
-              try {
-                const _u = JSON.parse(_uStr);
-                const _planAS = (_u.plan || '').toLowerCase();
-                const _roleAS = (_u.role || '').toLowerCase();
-                _isFreeAS = !['pro', 'premium', 'lifetime'].includes(_planAS) && !['admin', 'super-admin'].includes(_roleAS);
-              } catch (_) {}
-            }
-            return (
-              <button
-                onClick={_isFreeAS ? () => setShowUpgradeModal(true) : handleAnalyzeScreen}
-                disabled={_isFreeAS ? false : isAnalyzing || isGenerating}
-                title={_isFreeAS ? 'Analyze Screen is a paid feature. Upgrade to Pro to unlock.' : ''}
-                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
-                  _isFreeAS
-                    ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
-                    : isAnalyzing 
-                      ? 'bg-purple-600/70 text-white animate-pulse' 
-                      : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
-                }`}
-                data-action="analyze-screen"
-              >
-                {_isFreeAS ? (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                ) : (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                )}
-                {_isFreeAS ? 'Analyze' : isAnalyzing ? 'Analyzing...' : 'Analyze'}
-              </button>
-            );
-          })()}
+          <button
+            onClick={handleAnalyzeScreen}
+            disabled={isAnalyzing || isGenerating}
+            className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
+              isAnalyzing 
+                ? 'bg-purple-600/70 text-white animate-pulse' 
+                : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
+            }`}
+            data-action="analyze-screen"
+          >
+            {isAnalyzing ? (
+              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            )}
+            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+          </button>
           
           <button
             onClick={handleStopResponse}
@@ -3064,6 +3081,29 @@ ${companyInfoSummary}`;
             >
               {isGenerating ? 'Generating...' : 'Get Answer'}
             </button>
+
+            {/* Transcription time remaining indicator */}
+            {(() => {
+              try {
+                const _u = JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}');
+                const _isAdmin = _u.role === 'admin' || _u.role === 'super-admin' || _u.tokens === -1;
+                if (_isAdmin) return null;
+              } catch {}
+              const mins = Math.floor(transcriptionSecondsRemaining / 60);
+              const secs = transcriptionSecondsRemaining % 60;
+              const totalMins = 25;
+              const usedMins = totalMins - mins;
+              const pct = (usedMins / totalMins) * 100;
+              return (
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 whitespace-nowrap">
+                  <span>🎤</span>
+                  <div className="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden shrink-0">
+                    <div className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full" style={{ width: `${Math.max(0, 100 - pct)}%` }} />
+                  </div>
+                  <span className="font-mono text-slate-400">{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')} / 25:00</span>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -3948,21 +3988,18 @@ ${companyInfoSummary}`;
         </div>
       )}
 
-      {/* Out of Tokens Modal - Overlay */}
+      {/* Out of Credits Modal - Overlay */}
       <StealthModal
         isOpen={showOutOfTokensModal}
         onClose={() => setShowOutOfTokensModal(false)}
-        title="Out of Tokens"
+        title="Out of Credits"
         icon="🪙"
         variant="warning"
         primaryAction={{
-          label: 'Upgrade in Main App',
+          label: 'Upgrade Plan',
           onClick: () => {
             setShowOutOfTokensModal(false);
-            if (typeof window !== 'undefined' && (window as any).require) {
-              const { ipcRenderer } = (window as any).require('electron');
-              ipcRenderer.send('show-main-window');
-            }
+            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{
@@ -3970,9 +4007,14 @@ ${companyInfoSummary}`;
           onClick: () => setShowOutOfTokensModal(false)
         }}
       >
-        You've used all <strong className="text-white">10 free tokens</strong> (1 token = 1 question).
-        <br /><br />
-        <strong className="text-amber-400">Upgrade to Pro</strong> in the main app to get unlimited tokens!
+        <div className="space-y-3">
+          <p className="text-slate-300 text-sm">
+            You've used all <strong className="text-white">15 free credits</strong>.
+          </p>
+          <p className="text-slate-300 text-sm">
+            <strong className="text-amber-400">Upgrade to Pro</strong> to get unlimited credits and unlock premium features!
+          </p>
+        </div>
       </StealthModal>
 
       {/* Upgrade to Pro Modal (BrowseAI gating) */}
@@ -3983,13 +4025,10 @@ ${companyInfoSummary}`;
         icon="🚀"
         variant="info"
         primaryAction={{
-          label: 'View Pricing',
+          label: 'Upgrade Plan',
           onClick: () => {
             setShowUpgradeModal(false);
-            if (typeof window !== 'undefined' && (window as any).require) {
-              const { ipcRenderer } = (window as any).require('electron');
-              ipcRenderer.send('show-main-window');
-            }
+            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{
@@ -3997,9 +4036,14 @@ ${companyInfoSummary}`;
           onClick: () => setShowUpgradeModal(false)
         }}
       >
-        <strong className="text-blue-300">BrowseAI</strong> and <strong className="text-blue-300">Analyze Screen</strong> are available on <strong className="text-white">Pro</strong> and higher plans.
-        <br /><br />
-        Upgrade to unlock AI-powered browser automation, screen analysis, and unlimited tokens.
+        <div className="space-y-3">
+          <p className="text-slate-300 text-sm">
+            <strong className="text-blue-300">BrowseAI</strong> is available on <strong className="text-white">Pro</strong> and higher plans.
+          </p>
+          <p className="text-slate-300 text-sm">
+            Upgrade to unlock AI-powered browser automation and unlimited credits.
+          </p>
+        </div>
       </StealthModal>
 
       {/* Generic Alert Modal */}

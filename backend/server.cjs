@@ -581,7 +581,8 @@ OUTPUT:
       emailVerificationExpiry: tokenExpiry,
       role: 'user', // Default role: regular user
       plan: 'Free', // Free plan for new users
-      tokens: 10, // ONE-TIME: 10 free tokens on signup
+      tokens: 15, // ONE-TIME: 15 free Credits on signup
+      transcriptionSeconds: 0, // ONE-TIME: 25 min (1500s) free transcription limit
       createdAt: new Date(),
       apiKeys: {},
       selectedProvider: '', // No default provider - user must choose
@@ -968,7 +969,7 @@ app.post('/api/auth/google', async (req, res) => {
         emailVerificationExpiry: null,
         role: 'user',
         plan: 'Free',
-        tokens: 10,
+        tokens: 15,
         createdAt: new Date(),
         apiKeys: {},
         selectedProvider: '',
@@ -1862,7 +1863,7 @@ app.get('/api/tokens/check/:userId', async (req, res) => {
     console.error('Check tokens error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to check tokens: ' + error.message
+        message: 'Failed to check credits: ' + error.message
     });
   }
 });
@@ -1899,7 +1900,7 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
     if (hasUnlimitedTokens) {
       return res.json({
         success: true,
-        message: 'Unlimited tokens',
+        message: 'Unlimited credits',
         tokens: user.tokens,
         consumed: 0
       });
@@ -1909,7 +1910,7 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
     if (user.tokens < amount) {
       return res.status(403).json({
         success: false,
-        message: 'Insufficient tokens',
+        message: 'Insufficient credits',
         tokens: user.tokens
       });
     }
@@ -1922,7 +1923,7 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Tokens consumed',
+              message: 'Credits consumed',
       tokens: user.tokens - amount,
       consumed: amount
     });
@@ -1930,7 +1931,147 @@ app.post('/api/tokens/consume/:userId', async (req, res) => {
     console.error('Consume tokens error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to consume tokens: ' + error.message
+        message: 'Failed to consume credits: ' + error.message
+    });
+  }
+});
+
+// Check if user can listen (tokens > 0 AND transcription time remaining)
+app.get('/api/tokens/check-listen/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const isAdmin = user.role === 'admin' || user.role === 'super-admin';
+    const hasUnlimitedTokens = isAdmin || user.tokens === -1;
+    const transcriptionLimit = 1500;
+    const transcriptionSeconds = user.transcriptionSeconds || 0;
+    const transcriptionRemaining = Math.max(0, transcriptionLimit - transcriptionSeconds);
+    const hasTranscriptionTime = isAdmin || hasUnlimitedTokens || transcriptionRemaining > 0;
+
+    let canListen = false;
+    let reason = 'ok';
+
+    if (isAdmin || hasUnlimitedTokens) {
+      canListen = true;
+    } else if (user.tokens <= 0) {
+      canListen = false;
+      reason = 'out_of_tokens';
+    } else if (!hasTranscriptionTime) {
+      canListen = false;
+      reason = 'transcription_limit';
+    } else {
+      canListen = true;
+    }
+
+    res.json({
+      success: true,
+      canListen,
+      reason,
+      transcriptionSeconds,
+      transcriptionLimit,
+      transcriptionRemaining,
+      tokens: user.tokens,
+      isAdmin,
+      hasUnlimitedTokens,
+      role: user.role,
+      plan: user.plan
+    });
+  } catch (error) {
+    console.error('Check listen error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check listen status: ' + error.message
+    });
+  }
+});
+
+// Add transcription time (called when user stops listening)
+app.post('/api/tokens/add-transcription-time/:userId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    const { userId } = req.params;
+    const { seconds } = req.body;
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+
+    if (typeof seconds !== 'number' || seconds <= 0 || seconds > 3600) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid seconds value (must be 1-3600)'
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Don't track for admin/unlimited
+    const isAdmin = user.role === 'admin' || user.role === 'super-admin';
+    const hasUnlimitedTokens = isAdmin || user.tokens === -1;
+    if (hasUnlimitedTokens) {
+      return res.json({
+        success: true,
+        transcriptionSeconds: user.transcriptionSeconds || 0,
+        transcriptionRemaining: 1500,
+        limitReached: false,
+        unlimited: true
+      });
+    }
+
+    // Add transcription seconds
+    await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $inc: { transcriptionSeconds: seconds } }
+    );
+
+    const transcriptionLimit = 1500;
+    const newTotal = (user.transcriptionSeconds || 0) + seconds;
+    const transcriptionRemaining = Math.max(0, transcriptionLimit - newTotal);
+    const limitReached = transcriptionRemaining <= 0;
+
+    res.json({
+      success: true,
+      transcriptionSeconds: newTotal,
+      transcriptionRemaining,
+      limitReached,
+      unlimited: false
+    });
+  } catch (error) {
+    console.error('Add transcription time error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add transcription time: ' + error.message
     });
   }
 });

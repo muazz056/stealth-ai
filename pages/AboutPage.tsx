@@ -86,7 +86,7 @@ const AboutPage: React.FC = () => {
           <div className="text-center">
             <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-4">Ready to ace your next interview?</h2>
             <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">
-              Start with 10 free tokens. No credit card required.
+              Start with 15 free credits. No credit card required.
             </p>
             <Link
               to="/service"

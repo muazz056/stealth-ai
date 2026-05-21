@@ -326,6 +326,18 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
+  // Initialize transcription time remaining from user data
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('isa_current_user');
+      if (saved) {
+        const u = JSON.parse(saved);
+        const trSecs = u.transcriptionSeconds || 0;
+        setTranscriptionSecondsRemaining(Math.max(0, 1500 - trSecs));
+      }
+    } catch {}
+  }, []);
+
   // Helper function to parse and format API errors
   const parseApiError = (error: any): {title: string, message: string, details?: string} => {
     const errorMsg = error.message || String(error);
@@ -1140,6 +1152,8 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   }, [manualTextInput, transcribedText]);
   const startListenRef = useRef<(() => void) | null>(null);
   const stopListenRef = useRef<(() => void) | null>(null);
+  const transcriptionStartTimeRef = useRef<number>(0);
+  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500);
 
   useEffect(() => {
     try {
@@ -1375,7 +1389,31 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       console.log('⏭️ [App] handleStartListen skipped - already started');
       return;
     }
+
+    // Check transcription limits before starting
+    const userForListen = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+    const isAdminUser = userForListen.role === 'admin' || userForListen.role === 'super-admin' || userForListen.tokens === -1;
+    if (!isAdminUser && userForListen._id) {
+      const listenCheck = await tokensClient.checkListen(userForListen._id);
+      if (!listenCheck.canListen) {
+        if (listenCheck.reason === 'out_of_tokens') {
+          setShowOutOfTokensModal(true);
+        } else if (listenCheck.reason === 'transcription_limit') {
+          setModalInfo({
+            title: 'Transcription Limit Reached',
+            message: 'You have used all 25 minutes of free transcription. Upgrade to Pro for unlimited transcription.',
+            variant: 'warning' as const,
+            icon: '🎤'
+          });
+        }
+        return;
+      }
+    }
+
     wantToListenRef.current = true;
+
+    // Record start time for tracking
+    transcriptionStartTimeRef.current = Date.now();
 
     setTranscribedText('');
     setCommittedText('');
@@ -1654,7 +1692,27 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
     const handleStopListen = () => {
       wantToListenRef.current = false;
-      
+
+      // Track transcription time
+      if (transcriptionStartTimeRef.current > 0) {
+        const elapsed = Math.floor((Date.now() - transcriptionStartTimeRef.current) / 1000);
+        transcriptionStartTimeRef.current = 0;
+        if (elapsed > 0) {
+          const userForTime = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+          const isAdminUser = userForTime.role === 'admin' || userForTime.role === 'super-admin' || userForTime.tokens === -1;
+          if (!isAdminUser && userForTime._id) {
+            tokensClient.addTranscriptionTime(userForTime._id, elapsed).then(result => {
+              if (result.success) {
+                setTranscriptionSecondsRemaining(result.transcriptionRemaining);
+                const current = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+                current.transcriptionSeconds = result.transcriptionSeconds;
+                localStorage.setItem(LS_USER_KEY, JSON.stringify(current));
+              }
+            }).catch(err => console.error('Failed to add transcription time:', err));
+          }
+        }
+      }
+
       if (isElectronRef.current && (deepgramWsRef.current || mediaRecorderRef.current || deepgramAudioRef.current || displayCaptureStreamRef.current || micCaptureStreamRef.current)) {
         const currentText = transcribedText.trim();
         setIsListening(false);
@@ -3018,6 +3076,29 @@ Respond in ${langDisplay}.]`;
                     <span>{isListening ? 'Stop' : 'Listen'}</span>
                     {shortcuts?.toggleListen && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.toggleListen)}</span>}
                   </button>
+                  
+                  {/* Transcription time remaining indicator */}
+                  {(() => {
+                    try {
+                      const _u = JSON.parse(localStorage.getItem('isa_current_user') || '{}');
+                      const _isAdmin = _u.role === 'admin' || _u.role === 'super-admin' || _u.tokens === -1;
+                      if (_isAdmin) return null;
+                    } catch {}
+                    const mins = Math.floor(transcriptionSecondsRemaining / 60);
+                    const secs = transcriptionSecondsRemaining % 60;
+                    const usedMins = 25 - mins;
+                    const pct = (usedMins / 25) * 100;
+                    return (
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 justify-center">
+                        <span>🎤</span>
+                        <div className="w-14 h-1.5 bg-slate-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full" style={{ width: `${Math.max(0, 100 - pct)}%` }} />
+                        </div>
+                        <span className="font-mono">{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}</span>
+                        <span className="text-slate-400 dark:text-slate-500">/ 25:00</span>
+                      </div>
+                    );
+                  })()}
                 
                   <button 
                     onClick={() => {
@@ -3228,18 +3309,18 @@ Respond in ${langDisplay}.]`;
         </div>
       )}
 
-      {/* Out of Tokens Modal */}
+      {/* Out of Credits Modal */}
       <StealthModal
         isOpen={showOutOfTokensModal}
         onClose={() => setShowOutOfTokensModal(false)}
-        title="Out of Tokens"
+        title="Out of Credits"
         icon="🪙"
         variant="warning"
         primaryAction={{
-          label: 'View Pricing',
+          label: 'Upgrade Plan',
           onClick: () => {
             setShowOutOfTokensModal(false);
-            window.location.href = '/pricing';
+            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{
@@ -3247,9 +3328,14 @@ Respond in ${langDisplay}.]`;
           onClick: () => setShowOutOfTokensModal(false)
         }}
       >
-        You've used all <strong className="text-white">10 free tokens</strong> (1 token = 1 question).
-        <br /><br />
-        <strong className="text-amber-400">Upgrade to Pro</strong> to get unlimited tokens and unlock premium features!
+        <div className="space-y-3">
+          <p className="text-slate-600 dark:text-slate-300 text-sm">
+            You've used all <strong className="text-white">15 free credits</strong>.
+          </p>
+          <p className="text-slate-600 dark:text-slate-300 text-sm">
+            <strong className="text-amber-400 dark:text-amber-400">Upgrade to Pro</strong> to get unlimited credits and unlock premium features!
+          </p>
+        </div>
       </StealthModal>
 
       {/* Generic Alert Modal */}

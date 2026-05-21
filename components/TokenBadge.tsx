@@ -45,7 +45,7 @@ const TokenBadge: React.FC<TokenBadgeProps> = ({ user, isMobile = false, onUpgra
                 {hasUnlimited ? 'Unlimited' : tokens}
               </span>
               {!hasUnlimited && (
-                <span className="text-xs text-slate-500 dark:text-slate-400">tokens</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Credits</span>
               )}
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
@@ -93,7 +93,7 @@ const TokenBadge: React.FC<TokenBadgeProps> = ({ user, isMobile = false, onUpgra
           {hasUnlimited ? 'Unlimited' : tokens}
         </span>
         {!hasUnlimited && (
-          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">tokens</span>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Credits</span>
         )}
       </div>
       {!isPaid && tokens <= 3 && (

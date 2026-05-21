@@ -120,7 +120,7 @@ const PricingPage: React.FC = () => {
             period=""
             description="Perfect for testing the waters"
             features={[
-              '10 tokens on signup',
+              '15 free credits on signup',
               'All AI providers supported',
               'Real-time voice transcription',
               'Screen analysis',
@@ -139,7 +139,7 @@ const PricingPage: React.FC = () => {
             originalPrice={isAnnual ? '$348/yr' : undefined}
             description="For serious interview preparation"
             features={[
-              'Unlimited tokens',
+              'Unlimited credits',
               'All AI providers supported',
               'Real-time voice transcription',
               'Screen analysis',
@@ -161,7 +161,7 @@ const PricingPage: React.FC = () => {
             originalPrice={isAnnual ? '$588/yr' : undefined}
             description="Maximum advantage with priority AI"
             features={[
-              'Unlimited tokens',
+              'Unlimited credits',
               'All AI providers supported',
               'Real-time voice transcription',
               'Screen analysis',
@@ -184,7 +184,7 @@ const PricingPage: React.FC = () => {
             period="one-time"
             description="Pay once, use forever"
             features={[
-              'Unlimited tokens forever',
+              'Unlimited credits forever',
               'All AI providers supported',
               'Real-time voice transcription',
               'Screen analysis',
@@ -209,12 +209,12 @@ const PricingPage: React.FC = () => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <FAQItem question="What counts as a token?" answer="1 token = 1 question. Each AI response you receive consumes one token. New users get 10 free tokens on signup." />
-            <FAQItem question="Can I upgrade my plan?" answer="Yes! You can upgrade to Pro, Premium, or Lifetime at any time. Your tokens will be upgraded immediately." />
+            <FAQItem question="What counts as a credit?" answer="1 credit = 1 question. Each AI response you receive consumes one credit. New users get 15 free credits on signup." />
+            <FAQItem question="Can I upgrade my plan?" answer="Yes! You can upgrade to Pro, Premium, or Lifetime at any time. Your credits will be upgraded immediately." />
             <FAQItem question="Which AI providers are supported?" answer="We support Google Gemini, OpenAI GPT, Claude, and Groq. You'll need your own API keys." />
             <FAQItem question="Is there a refund policy?" answer="Yes! We offer a 30-day money-back guarantee for all paid plans. No questions asked." />
             <FAQItem question="How does stealth mode work?" answer="The overlay window uses advanced Windows APIs to exclude itself from screen capture, making it invisible to screen sharing." />
-            <FAQItem question="Do admins get unlimited access?" answer="Yes! Admin accounts have unlimited tokens and lifetime access to all features." />
+            <FAQItem question="Do admins get unlimited access?" answer="Yes! Admin accounts have unlimited credits and lifetime access to all features." />
           </div>
         </div>
 
@@ -230,7 +230,7 @@ const PricingPage: React.FC = () => {
               <p className="text-slate-700 dark:text-slate-300 mb-8 md:mb-10 max-w-2xl mx-auto text-base md:text-lg">
                 Start with our Free plan and upgrade anytime. No credit card required.
                 <br />
-                <span className="text-blue-600 dark:text-blue-400 font-semibold">Get 10 free tokens to test it out!</span>
+                <span className="text-blue-600 dark:text-blue-400 font-semibold">Get 15 free credits to test it out!</span>
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center max-w-lg mx-auto">
                 <Link

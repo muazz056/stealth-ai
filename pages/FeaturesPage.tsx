@@ -115,7 +115,7 @@ const FeaturesPage: React.FC = () => {
         <div className="mt-20 text-center">
           <h2 className="text-3xl sm:text-4xl font-black text-black dark:text-white mb-6">Ready to get started?</h2>
           <p className="text-lg text-slate-600 dark:text-slate-400 mb-8 max-w-2xl mx-auto">
-            Start with 10 free tokens. No credit card required.
+            Start with 15 free credits. No credit card required.
           </p>
           <Link
             to="/service"
