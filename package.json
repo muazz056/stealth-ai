@@ -167,8 +167,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Stealth Assist",
-      "publisherName": "Chaudhry Muaz"
+      "shortcutName": "Stealth Assist"
     }
   }
 }
