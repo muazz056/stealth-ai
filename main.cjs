@@ -25,13 +25,10 @@ app.on('second-instance', () => {
     }
 });
 
-// Backend URL: read from .env or use localhost for dev / Railway for packaged
-// Use API_BACKEND_URL env var (from .env) as the primary source, then fallback
-const LOCAL_BACKEND = process.env.API_BACKEND_URL || 'http://localhost:3001';
-const PRODUCTION_BACKEND = process.env.API_BACKEND_URL || LOCAL_BACKEND;
-
-// In dev mode use localhost, in packaged use the configured production backend
-const BACKEND_URL = app.isPackaged ? PRODUCTION_BACKEND : LOCAL_BACKEND;
+// Backend URL: read from .env. Check VITE_BACKEND_URL first, then API_BACKEND_URL.
+// In dev (unpackaged) use localhost fallback. In packaged use whatever env var is set.
+// Set API_BACKEND_URL in .env before running `npm run dist` for production builds.
+const BACKEND_URL = process.env.VITE_BACKEND_URL || process.env.API_BACKEND_URL || (app.isPackaged ? 'http://localhost:3001' : 'http://localhost:3001');
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
@@ -1082,7 +1079,7 @@ function createMainWindow() {
       console.log('📂 FINAL Loading from:', indexPath);
       mainWindow.loadFile(indexPath, { hash: '/service', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      mainWindow.loadURL(`${FRONTEND_URL}/service${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
+      mainWindow.loadURL(`${FRONTEND_URL}/service${BACKEND_URL !== 'http://localhost:3001' ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
@@ -1440,7 +1437,7 @@ function createOverlayWindow() {
       console.log('📂 Loading overlay from:', overlayIndexPath);
       overlay.loadFile(overlayIndexPath, { hash: '/overlay', search: `?backendUrl=${encodeURIComponent(BACKEND_URL)}` });
     } else {
-      overlay.loadURL(`${FRONTEND_URL}/overlay${BACKEND_URL !== LOCAL_BACKEND ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
+      overlay.loadURL(`${FRONTEND_URL}/overlay${BACKEND_URL !== 'http://localhost:3001' ? `?backendUrl=${encodeURIComponent(BACKEND_URL)}` : ''}`);
     }
     
     // Add error handling
