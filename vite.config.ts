@@ -30,10 +30,8 @@ function spaFallbackPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // Backend URL: Railway for production, localhost for development
-    const backendUrl = mode === 'production' 
-      ? (env.API_BACKEND_URL || 'https://stealth-ai-production-e686.up.railway.app')
-      : 'http://localhost:3001';
+    // Backend URL: read from .env API_BACKEND_URL, fallback to localhost
+    const backendUrl = env.API_BACKEND_URL || 'http://localhost:3001';
     
     console.log(`Building for ${mode}, backend: ${backendUrl}`);
     

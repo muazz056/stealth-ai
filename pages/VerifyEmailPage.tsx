@@ -22,18 +22,17 @@ const getApiUrl = () => {
     if (fromHash) return decodeURIComponent(fromHash);
   }
   
-  // Then: use VITE_BACKEND_URL (Railway env var)
-  const railwayUrl = import.meta.env.VITE_BACKEND_URL;
-  if (railwayUrl) return railwayUrl;
+  // Use VITE_BACKEND_URL from .env (set via Vite at build time)
+  const envUrl = import.meta.env.VITE_BACKEND_URL;
+  if (envUrl) return envUrl;
   
   // In Electron, use VITE_API_BASE_URL
   if (typeof window !== 'undefined' && (window as any).require) {
     return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
   }
   
-  // Fallback: derive from current origin (replace Vercel with Railway)
-  const origin = window.location.origin;
-  return origin.replace('stealth-ai-sand.vercel.app', 'stealth-ai-production-e686.up.railway.app');
+  // Fallback: use same origin (assume backend is on same host)
+  return `${window.location.protocol}//${window.location.hostname}:3001`;
 };
 
 const VerifyEmailPage: React.FC = () => {

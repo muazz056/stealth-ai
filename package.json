@@ -99,6 +99,7 @@
       "node_modules/**/*",
       "!node_modules/ffi-napi/**/*",
       "!node_modules/ref-napi/**/*",
+      "public/**/*",
       "package.json",
       ".env"
     ],

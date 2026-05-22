@@ -8,10 +8,14 @@ const os = require('os');
 // On Windows, process.title sets both console title AND helps some tools identify the process.
 // For Task Manager's Processes tab, the displayed name comes from the
 // executable's FileDescription metadata (set by electron-builder via rcedit).
+// ALWAYS call setAppUserModelId() BEFORE any window creation — this is what
+// Windows Task Manager reads for the "Processes" tab name and icon grouping.
+app.setAppUserModelId('com.interviewassist.stealthai.StealthAssist');
 process.title = 'Stealth Assist';
 app.name = 'Stealth Assist';
 // Rename Chromium child processes (GPU, utility, etc.) from 'Electron' to app name
 app.commandLine.appendSwitch('app-name', 'Stealth Assist');
+app.commandLine.appendSwitch('application-name', 'Stealth Assist');
 // requestSingleInstanceLock ensures only one instance and helps with Windows taskbar grouping
 const gotLock = app.requestSingleInstanceLock();
 app.on('second-instance', () => {
@@ -21,28 +25,48 @@ app.on('second-instance', () => {
     }
 });
 
-// ALWAYS use localhost for dev, Railway for packaged
-const LOCAL_BACKEND = 'http://localhost:3001';
-const RAILWAY_BACKEND = 'https://stealth-ai-production-e686.up.railway.app';
+// Backend URL: read from .env or use localhost for dev / Railway for packaged
+// Use API_BACKEND_URL env var (from .env) as the primary source, then fallback
+const LOCAL_BACKEND = process.env.API_BACKEND_URL || 'http://localhost:3001';
+const PRODUCTION_BACKEND = process.env.API_BACKEND_URL || LOCAL_BACKEND;
 
-// In dev mode use localhost, in packaged use Railway
-const BACKEND_URL = app.isPackaged ? RAILWAY_BACKEND : LOCAL_BACKEND;
+// In dev mode use localhost, in packaged use the configured production backend
+const BACKEND_URL = app.isPackaged ? PRODUCTION_BACKEND : LOCAL_BACKEND;
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
 
-// App icon: use square stealth-logo1 as primary app icon (public/ copied to dist/ during build; fallback to public/ for dev)
-// Square PNG is required for Windows ICO conversion in electron-builder
+// App icon: use the 512x512 stealth logo as primary app icon.
+// For packaged builds, the icon PNG may be in several locations depending on
+// how electron-builder copies the files. We try all common paths.
 const ICON_FILENAME = 'stealth-logo-512.png';
 const APP_ICON_CANDIDATES = app.isPackaged
   ? [
+      // Inside the app asar (dist/ folder from Vite build)
       path.join(process.resourcesPath, 'app', 'dist', ICON_FILENAME),
       path.join(__dirname, 'dist', ICON_FILENAME),
+      path.join(process.resourcesPath, 'dist', ICON_FILENAME),
+      // Inside resources/app/public/ (if public/ was added to build files)
+      path.join(process.resourcesPath, 'app', 'public', ICON_FILENAME),
+      path.join(process.resourcesPath, 'public', ICON_FILENAME),
+      path.join(__dirname, 'public', ICON_FILENAME),
+      // Fallback to resources root
       path.join(process.resourcesPath, ICON_FILENAME),
+      path.join(process.resourcesPath, 'app', ICON_FILENAME),
     ]
   : [path.join(__dirname, 'public', ICON_FILENAME)];
 const APP_ICON_PATH = APP_ICON_CANDIDATES.find(p => fs.existsSync(p)) || APP_ICON_CANDIDATES[0];
 const APP_ICON = nativeImage.createFromPath(APP_ICON_PATH);
+
+// Also create a smaller 32x32 icon for use in notifications and taskbar
+let APP_ICON_SMALL = APP_ICON;
+if (APP_ICON && !APP_ICON.isEmpty()) {
+    try {
+        APP_ICON_SMALL = APP_ICON.resize({ width: 32, height: 32, quality: 'better' });
+    } catch (e) {
+        // fall back to original
+    }
+}
 
 // Suppress Electron's default error dialogs for uncaught exceptions
 process.on('uncaughtException', (error) => {
@@ -1657,8 +1681,6 @@ function createOverlayWindow() {
 }
 
 app.whenReady().then(() => {
-    // Set app identity for Windows taskbar & process list (must be inside whenReady)
-    app.setAppUserModelId('com.stealthassist.app');
     // Re-assert process title after Electron initialization (may have been reset)
     process.title = 'Stealth Assist';
     
