@@ -30,8 +30,8 @@ function spaFallbackPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // Backend URL: read from .env API_BACKEND_URL, fallback to localhost
-    const backendUrl = env.API_BACKEND_URL || 'http://localhost:3001';
+    // Backend URL: check VITE_BACKEND_URL first (what Vercel has), then API_BACKEND_URL, then localhost
+    const backendUrl = env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
     
     console.log(`Building for ${mode}, backend: ${backendUrl}`);
     
