@@ -2394,6 +2394,12 @@ Respond in ${langDisplay}.]`
 
         const responseLanguage = overlayUserSettings?.responseLanguage || 'English';
         let contextPrompt = `${savedBasePrompt.replace(/\{LANGUAGE\}/g, responseLanguage)} Respond in ${responseLanguage} Language. You will be given a screenshot containing one or more questions. Carefully analyze the image and provide accurate, clear, and to-the-point answers.`;
+
+        contextPrompt += `\n\nIMPORTANT: First identify the exact question(s) from the screenshot, then answer them. Use this format:
+QUESTION: [the exact question text from the screenshot]
+ANSWER: [your detailed answer]
+
+If there are multiple questions, repeat this format for each one.`;
         
         if (savedResume) contextPrompt += `\n\nCandidate Resume Context:\n${savedResume}`;
         if (savedJD) contextPrompt += `\n\nJob Description Context:\n${savedJD}`;
@@ -2424,10 +2430,24 @@ Respond in ${langDisplay}.]`
         const data = await response.json();
         const text = data.text || 'No content found to analyze.';
 
-        setAiResponse(text);
+        // Extract question from AI response
+        let extractedQuestion = '';
+        let displayText = text;
+        const qMatch = text.match(/QUESTION:\s*(.+?)(?:\n|$)/i);
+        if (qMatch) {
+          extractedQuestion = qMatch[1].trim();
+          displayText = text.replace(/QUESTION:\s*.+?\n?/i, '').trim();
+        }
 
-        // Update local chat history (lightweight text-only version) and save
-        const historyLabel = userMessage ? `[Screen Analysis: "${userMessage}"]` : '[Analyzed Screen]';
+        setAiResponse(displayText);
+        if (extractedQuestion) {
+          setManualTextInput(extractedQuestion);
+        } else {
+          setManualTextInput('');
+        }
+
+        // Save chat history with extracted question as the user message
+        const historyLabel = extractedQuestion || (userMessage ? `[Screen Analysis: "${userMessage}"]` : '[Analyzed Screen]');
         const updatedHistoryAfterAnalysis = [
           ...chatHistory,
           { role: 'user', parts: [{ text: historyLabel }] },
@@ -2439,11 +2459,10 @@ Respond in ${langDisplay}.]`
         
         await saveChatHistory(updatedHistoryAfterAnalysis);
 
-        // Clear the input after analysis
+        // Clear other inputs but keep the extracted question visible
         setTranscribedText('');
         setCommittedText('');
         setInterimText('');
-        setManualTextInput('');
 
       } catch (error: any) {
         console.error('Analysis error:', error);
