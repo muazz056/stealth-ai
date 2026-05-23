@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 // Allowed email providers for registration
 const ALLOWED_EMAIL_PROVIDERS = [
   'gmail.com',
@@ -156,6 +157,14 @@ async function sendVerificationEmail(email, token, username) {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+const googleAuthResults = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, entry] of googleAuthResults) {
+    if (now - entry.ts > 300000) googleAuthResults.delete(state);
+  }
+}, 60000);
 
 // Try process.env first, then fallback to .env file
 let MONGO_URI = process.env.MONGODB_URI;
@@ -570,12 +579,15 @@ OUTPUT:
 - No emojis
 - Use markdown formatting when helpful`;
 
+    // Hash password for non-admin users
+    const hashedPassword = await bcrypt.hash(password, 12);
+
     // Create new user with default settings (unverified)
     const newUser = {
       username,
       name,
       email,
-      password, // In production, hash this with bcrypt!
+      password: hashedPassword,
       verified: false,
       emailVerificationToken: verificationToken,
       emailVerificationExpiry: tokenExpiry,
@@ -655,11 +667,22 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Allow login with username OR email
     const user = await users.findOne({
-      $or: [{ username: username }, { email: username }],
-      password: password
+      $or: [{ username: username }, { email: username }]
     });
 
     if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password'
+      });
+    }
+
+    // Compare password (supports both hashed and legacy plaintext)
+    const passwordMatch = user.password.startsWith('$2')
+      ? await bcrypt.compare(password, user.password)
+      : user.password === password;
+
+    if (!passwordMatch) {
       return res.status(401).json({
         success: false,
         message: 'Invalid username or password'
@@ -1076,6 +1099,155 @@ QUESTION CLASSIFICATION:
       message: 'Google login failed: ' + error.message
     });
   }
+});
+
+// Server-side Google OAuth authorize endpoint (for Electron with polling)
+app.get('/api/auth/google/authorize', async (req, res) => {
+  try {
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      return res.status(500).json({ success: false, message: 'Google OAuth not configured' });
+    }
+
+    const state = crypto.randomBytes(16).toString('hex');
+
+    const { OAuth2Client } = require('google-auth-library');
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, redirectUri);
+
+    const authUrl = client.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['openid', 'email', 'profile'],
+      prompt: 'select_account',
+      state,
+    });
+
+    googleAuthResults.set(state, { status: 'pending', ts: Date.now() });
+
+    console.log('🔍 Generated OAuth URL redirect_uri:', redirectUri);
+    console.log('🔍 Full auth URL (first 300 chars):', authUrl.substring(0, 300));
+
+    res.json({ success: true, url: authUrl, state });
+  } catch (error) {
+    console.error('❌ Google authorize error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Server-side Google OAuth callback (for Electron with polling)
+app.get('/api/auth/google/callback', async (req, res) => {
+  try {
+    const { code, state, error: oauthError } = req.query;
+    if (oauthError) {
+      if (state) googleAuthResults.set(state, { status: 'error', message: oauthError, ts: Date.now() });
+      return res.send(successPage(false, 'Google sign-in was denied or failed.'));
+    }
+
+    if (!code) {
+      return res.status(400).send('Missing auth code. You may close this window.');
+    }
+
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      return res.status(500).send('Google OAuth not configured');
+    }
+
+    const { OAuth2Client } = require('google-auth-library');
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, redirectUri);
+
+    const { tokens } = await client.getToken(code);
+    client.setCredentials(tokens);
+
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload['sub'];
+    const email = payload['email'];
+    const name = payload['name'] || email.split('@')[0];
+    const picture = payload['picture'] || '';
+
+    if (!email) {
+      if (state) googleAuthResults.set(state, { status: 'error', message: 'No email returned from Google', ts: Date.now() });
+      return res.status(400).send('No email returned from Google');
+    }
+
+    console.log('✅ Server-side Google login verified for:', email);
+
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    let user = await users.findOne({ email });
+
+    if (user) {
+      const updates = { picture, name };
+      if (!user.googleId) updates.googleId = googleId;
+      if (!user.verified) updates.verified = true;
+      await users.updateOne({ _id: user._id }, { $set: updates });
+    } else {
+      const newUser = {
+        username: email.split('@')[0],
+        name, email,
+        password: '',
+        googleId, picture,
+        verified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        role: 'user', plan: 'Free',
+        tokens: 15,
+        transcriptionSeconds: 0,
+        createdAt: new Date(),
+        apiKeys: {}, selectedProvider: '',
+        voiceProvider: 'default', deepgramApiKey: '',
+        deepgramLanguage: 'multi', deepgramKeyterms: '',
+      };
+      const result = await users.insertOne(newUser);
+      user = { ...newUser, _id: result.insertedId };
+      console.log('✅ New user created via server-side Google OAuth:', email);
+    }
+
+    const { password: _, ...userData } = user;
+    const resultData = { success: true, user: { ...userData, picture } };
+
+    if (state) {
+      googleAuthResults.set(state, { status: 'complete', result: resultData, ts: Date.now() });
+    }
+
+    res.send(successPage(true));
+  } catch (error) {
+    console.error('❌ Google callback error:', error);
+    if (req.query.state) googleAuthResults.set(req.query.state, { status: 'error', message: error.message, ts: Date.now() });
+    res.status(500).send('Google login failed: ' + error.message);
+  }
+});
+
+function successPage(success, message) {
+  return `<!DOCTYPE html>
+<html><head><title>${success ? 'Login Successful' : 'Login Failed'} - Stealth Assist</title>
+<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#f1f5f9}h2{text-align:center}.icon{font-size:48px;text-align:center}</style></head>
+<body><div><div class="icon">${success ? '✅' : '❌'}</div>
+<h2>${success ? 'Signed in with Google!' : message || 'Sign-in failed'}</h2>
+<p style="text-align:center;color:#94a3b8">You may close this tab and return to Stealth Assist.</p></div></body></html>`;
+}
+
+// Poll for Google OAuth result
+app.get('/api/auth/google/result/:state', (req, res) => {
+  const entry = googleAuthResults.get(req.params.state);
+  if (!entry) return res.json({ status: 'pending' });
+  if (entry.status === 'complete') {
+    googleAuthResults.delete(req.params.state);
+    return res.json({ status: 'complete', result: entry.result });
+  }
+  if (entry.status === 'error') {
+    googleAuthResults.delete(req.params.state);
+    return res.json({ status: 'error', message: entry.message });
+  }
+  res.json({ status: 'pending' });
 });
 
 // Get User by ID

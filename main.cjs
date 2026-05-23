@@ -947,6 +947,79 @@ ipcMain.handle('auth-google-login', async (event, data) => {
     }
 });
 
+let activeGoogleAuth = null;
+
+// Google OAuth for Electron – backend proxy with polling pattern
+ipcMain.handle('google-auth-electron', async () => {
+    console.log('🎯 IPC: google-auth-electron started');
+    try {
+        const backendUrl = process.env.API_BACKEND_URL || 'http://localhost:3001';
+
+        // Get authorize URL from backend (backend handles OAuth redirect_uri)
+        const authRes = await fetch(`${backendUrl}/api/auth/google/authorize`);
+        const authData = await authRes.json();
+        if (!authData.success || !authData.url || !authData.state) {
+            return { success: false, message: authData.message || 'Failed to get Google auth URL' };
+        }
+
+        // Open in the system browser
+        shell.openExternal(authData.url);
+
+        // Poll backend for the auth result
+        const state = authData.state;
+        const pollPromise = new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                activeGoogleAuth = null;
+                resolve({ success: false, message: 'Google sign-in timed out' });
+            }, 120000);
+
+            let cancelled = false;
+
+            const poll = async () => {
+                if (cancelled) return;
+                try {
+                    const pollRes = await fetch(`${backendUrl}/api/auth/google/result/${state}`);
+                    const pollData = await pollRes.json();
+                    if (pollData.status === 'complete') {
+                        clearTimeout(timeout);
+                        activeGoogleAuth = null;
+                        resolve(pollData.result);
+                        return;
+                    }
+                    if (pollData.status === 'error') {
+                        clearTimeout(timeout);
+                        activeGoogleAuth = null;
+                        resolve({ success: false, message: pollData.message || 'Google sign-in failed' });
+                        return;
+                    }
+                } catch {}
+                // Poll every 2 seconds
+                if (!cancelled) setTimeout(poll, 2000);
+            };
+
+            poll();
+        });
+
+        activeGoogleAuth = { cancel: () => { activeGoogleAuth = null; }, promise: pollPromise };
+        return pollPromise;
+    } catch (error) {
+        console.error('❌ google-auth-electron error:', error);
+        activeGoogleAuth = null;
+        return { success: false, message: error.message };
+    }
+});
+
+// Cancel active Google auth
+ipcMain.handle('google-auth-electron-cancel', () => {
+    if (activeGoogleAuth) {
+        console.log('🛑 Cancelling active Google auth');
+        activeGoogleAuth.cancel();
+        activeGoogleAuth = null;
+        return { success: true };
+    }
+    return { success: false, message: 'No active auth to cancel' };
+});
+
 function createMainWindow() {
     mainWindow = new BrowserWindow({
         width: 800,
@@ -1089,6 +1162,10 @@ function createMainWindow() {
 
     // Open external links in system browser (not inside Electron)
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        // Allow Google OAuth popups to open inside Electron so postMessage works
+        if (url.includes('accounts.google.com')) {
+            return { action: 'allow' };
+        }
         shell.openExternal(url);
         return { action: 'deny' };
     });
@@ -1447,6 +1524,10 @@ function createOverlayWindow() {
 
     // Open external links in system browser (not inside overlay)
     overlay.webContents.setWindowOpenHandler(({ url }) => {
+        // Allow Google OAuth popups to open inside Electron so postMessage works
+        if (url.includes('accounts.google.com')) {
+            return { action: 'allow' };
+        }
         shell.openExternal(url);
         return { action: 'deny' };
     });
