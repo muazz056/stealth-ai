@@ -156,6 +156,7 @@ async function sendVerificationEmail(email, token, username) {
 }
 
 const app = express();
+app.enable('trust proxy');
 const PORT = process.env.PORT || 3001;
 
 const googleAuthResults = new Map();
