@@ -18,7 +18,7 @@ interface PricingCardProps {
 const PricingCard: React.FC<PricingCardProps> = ({
   name, price, originalPrice, period, description, features, cta, ctaLink, popular, badge
 }) => (
-  <div className={`group relative flex-1 min-w-[280px] max-w-[350px] bg-white dark:bg-slate-900/60 backdrop-blur-xl border ${popular ? 'border-blue-500 dark:border-blue-500/60 shadow-2xl shadow-blue-500/20 lg:scale-105 lg:z-10' : 'border-slate-300 dark:border-slate-700/50'} rounded-2xl p-8 hover:border-blue-400 dark:hover:border-blue-500/40 transition-all duration-300 flex flex-col h-full hover:scale-[1.03] transform`}>
+  <div className={`group relative w-full lg:flex-1 lg:min-w-0 max-w-[400px] bg-white dark:bg-slate-900/60 backdrop-blur-xl border ${popular ? 'border-blue-500 dark:border-blue-500/60 shadow-2xl shadow-blue-500/20 lg:scale-105 lg:z-10' : 'border-slate-300 dark:border-slate-700/50'} rounded-2xl p-8 hover:border-blue-400 dark:hover:border-blue-500/40 transition-all duration-300 flex flex-col h-full hover:scale-[1.03] transform`}>
     <div className={`absolute inset-0 bg-gradient-to-br ${popular ? 'from-blue-500/5 to-indigo-500/5' : 'from-slate-100 dark:from-slate-800/30 to-slate-200 dark:to-slate-900/30'} rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
 
     {badge && (
@@ -55,12 +55,14 @@ const PricingCard: React.FC<PricingCardProps> = ({
       <Link
         to={ctaLink}
         className={`block w-full text-center px-6 py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all duration-200 ${
-          popular
-            ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white shadow-xl shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.98]'
-            : 'bg-slate-200 dark:bg-slate-800/50 hover:bg-slate-300 dark:hover:bg-slate-700/50 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-600 hover:border-blue-500 dark:hover:border-blue-500/50 hover:scale-[1.02] active:scale-[0.98]'
-        } ${ctaLink === '#' ? 'opacity-50 cursor-not-allowed' : ''}`}
+          cta === 'Current Plan'
+            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-400/30 cursor-default'
+            : popular
+              ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white shadow-xl shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.98]'
+              : 'bg-slate-200 dark:bg-slate-800/50 hover:bg-slate-300 dark:hover:bg-slate-700/50 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-600 hover:border-blue-500 dark:hover:border-blue-500/50 hover:scale-[1.02] active:scale-[0.98]'
+        } ${ctaLink === '#' && cta !== 'Current Plan' ? 'opacity-50 cursor-not-allowed' : ''}`}
         onClick={(e) => {
-          if (ctaLink === '#') e.preventDefault();
+          if (ctaLink === '#' && cta !== 'Current Plan') e.preventDefault();
         }}
       >
         {cta}
@@ -69,8 +71,21 @@ const PricingCard: React.FC<PricingCardProps> = ({
   </div>
 );
 
-const PricingPage: React.FC = () => {
+interface PricingPageProps {
+  user?: any;
+}
+
+const PricingPage: React.FC<PricingPageProps> = ({ user }) => {
   const [isAnnual, setIsAnnual] = useState(false);
+
+  const currentPlan = user?.plan || 'Free';
+  const isLoggedIn = !!user;
+
+  const getCardCta = (name: string, defaultCta: string, defaultLink: string) => {
+    if (!isLoggedIn) return { cta: defaultCta, link: defaultLink };
+    if (name === currentPlan) return { cta: 'Current Plan', link: '/service' };
+    return { cta: defaultCta, link: defaultLink };
+  };
 
   return (
     <div className="min-h-screen bg-white dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-colors duration-300">
@@ -88,10 +103,10 @@ const PricingPage: React.FC = () => {
             </span>
           </div>
           <h1 className="text-4xl md:text-6xl font-black text-black dark:text-white mb-6 uppercase tracking-tight">
-            Simple <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-500 dark:to-purple-500">Pricing</span>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-500 dark:to-purple-500">Pricing</span>
           </h1>
           <p className="text-lg md:text-xl text-slate-700 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
-            Choose the plan that fits your interview preparation needs.
+            Choose the plan that fits your meeting preparation needs.
             <br />
             <span className="text-blue-600 dark:text-blue-400 font-semibold">Start free, upgrade when you're ready.</span>
           </p>
@@ -113,22 +128,22 @@ const PricingPage: React.FC = () => {
         </div>
 
         {/* Pricing Cards */}
-        <div className="flex flex-wrap justify-center gap-6 max-w-6xl mx-auto">
+        <div className="flex flex-col lg:flex-row flex-nowrap justify-center gap-4 md:gap-6 max-w-6xl mx-auto px-4">
           <PricingCard
             name="Free"
             price="$0"
             period=""
             description="Perfect for testing the waters"
             features={[
-              '15 free credits on signup',
-              'All AI providers supported',
+              '10 free credits on signup',
+              'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
               'Resume/CV integration',
               'Basic support'
             ]}
-            cta="Get Started"
-            ctaLink="/service"
+            cta={getCardCta('Free', 'Get Started', '/service').cta}
+            ctaLink={getCardCta('Free', 'Get Started', '/service').link}
             popular={false}
           />
 
@@ -137,10 +152,10 @@ const PricingPage: React.FC = () => {
             price={isAnnual ? '$249' : '$29'}
             period={isAnnual ? '/year' : '/month'}
             originalPrice={isAnnual ? '$348/yr' : undefined}
-            description="For serious interview preparation"
+            description="For serious meeting preparation"
             features={[
               'Unlimited credits',
-              'All AI providers supported',
+              'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
               'Resume/CV integration',
@@ -148,8 +163,8 @@ const PricingPage: React.FC = () => {
               'Advanced shortcuts',
               'BrowseAI integration'
             ]}
-            cta="Coming Soon"
-            ctaLink="#"
+            cta={getCardCta('Pro', 'Coming Soon', '#').cta}
+            ctaLink={getCardCta('Pro', 'Coming Soon', '#').link}
             popular={true}
             badge="MOST POPULAR"
           />
@@ -162,7 +177,7 @@ const PricingPage: React.FC = () => {
             description="Maximum advantage with priority AI"
             features={[
               'Unlimited credits',
-              'All AI providers supported',
+              'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
               'Resume/CV integration',
@@ -172,31 +187,8 @@ const PricingPage: React.FC = () => {
               'Priority AI routing',
               'Custom AI models'
             ]}
-            cta="Coming Soon"
-            ctaLink="#"
-            popular={false}
-            badge="BEST VALUE"
-          />
-
-          <PricingCard
-            name="Lifetime"
-            price="$199"
-            period="one-time"
-            description="Pay once, use forever"
-            features={[
-              'Unlimited credits forever',
-              'All AI providers supported',
-              'Real-time voice transcription',
-              'Screen analysis',
-              'Resume/CV integration',
-              'Premium support',
-              'Advanced shortcuts',
-              'BrowseAI integration',
-              'Future updates included',
-              'No recurring fees'
-            ]}
-            cta="Coming Soon"
-            ctaLink="#"
+            cta={getCardCta('Premium', 'Coming Soon', '#').cta}
+            ctaLink={getCardCta('Premium', 'Coming Soon', '#').link}
             popular={false}
             badge="BEST VALUE"
           />
@@ -209,7 +201,7 @@ const PricingPage: React.FC = () => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <FAQItem question="What counts as a credit?" answer="1 credit = 1 question. Each AI response you receive consumes one credit. New users get 15 free credits on signup." />
+            <FAQItem question="What counts as a credit?" answer="1 credit = 1 question. Each AI response you receive consumes one credit. New users get 10 free credits on signup." />
             <FAQItem question="Can I upgrade my plan?" answer="Yes! You can upgrade to Pro, Premium, or Lifetime at any time. Your credits will be upgraded immediately." />
             <FAQItem question="Which AI providers are supported?" answer="We support Google Gemini, OpenAI GPT, Claude, and Groq. You'll need your own API keys." />
             <FAQItem question="Is there a refund policy?" answer="Yes! We offer a 30-day money-back guarantee for all paid plans. No questions asked." />
@@ -225,12 +217,12 @@ const PricingPage: React.FC = () => {
 
             <div className="relative text-center">
               <h2 className="text-3xl md:text-4xl font-black text-black dark:text-white mb-4">
-                Ready to ace your interviews?
+                Ready to ace your meetings?
               </h2>
               <p className="text-slate-700 dark:text-slate-300 mb-8 md:mb-10 max-w-2xl mx-auto text-base md:text-lg">
                 Start with our Free plan and upgrade anytime. No credit card required.
                 <br />
-                <span className="text-blue-600 dark:text-blue-400 font-semibold">Get 15 free credits to test it out!</span>
+                <span className="text-blue-600 dark:text-blue-400 font-semibold">Get 10 free credits to test it out!</span>
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center max-w-lg mx-auto">
                 <Link

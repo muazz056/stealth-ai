@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -14,12 +14,13 @@ import AuthPage from './components/AuthPage';
 import SignInPage from './pages/SignInPage';
 import { authClient } from './src/utils/authClient';
 import { messagesClient } from './src/utils/messagesClient';
+import { apiClient, setAccessToken, setRefreshToken, clearTokens, getRefreshToken, refreshAccessToken, onTokenExpired } from './src/utils/apiClient';
 import { DarkModeProvider } from './src/context/DarkModeContext';
-import { API_CONFIG } from './src/config';
+import { APP_CONFIG } from './src/config';
 
 const LS_USER_KEY = 'isa_current_user';
 const LS_FIRST_LAUNCH_KEY = 'isa_first_launch_done';
-const API_BASE_URL = API_CONFIG.BASE_URL;
+const INACTIVITY_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 // Inner component that has access to useNavigate
 const AppRouterContent: React.FC = () => {
@@ -32,53 +33,145 @@ const AppRouterContent: React.FC = () => {
   const [sessionKey, setSessionKey] = useState(0);
   const [showSetupLoader, setShowSetupLoader] = useState(false);
   const [setupCountdown, setSetupCountdown] = useState(8);
-  
+  const [authChecked, setAuthChecked] = useState(false);
+
   // Detect if running in Electron
   const isElectron = typeof window !== 'undefined' && (window as any).require;
 
-  // Check authentication
+  // Track last activity timestamp for inactivity logout
+  const lastActivityRef = React.useRef(Date.now());
+  const activityCheckRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Update activity timestamp on user interaction
+  const updateActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+
+  // Set up activity listeners
   useEffect(() => {
-    const loadUser = async () => {
-      const savedUser = localStorage.getItem(LS_USER_KEY);
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(event => window.addEventListener(event, updateActivity));
+
+    // Check for inactivity every minute
+    activityCheckRef.current = setInterval(() => {
+      const elapsed = Date.now() - lastActivityRef.current;
+      if (elapsed > INACTIVITY_TIMEOUT_MS && isAuthenticated) {
+        console.log('🔒 Auto-logout due to inactivity');
+        performLogout();
+      }
+    }, 60000); // Check every minute
+
+    return () => {
+      events.forEach(event => window.removeEventListener(event, updateActivity));
+      if (activityCheckRef.current) clearInterval(activityCheckRef.current);
+    };
+  }, [isAuthenticated]);
+
+  // Register token expiry callback
+  useEffect(() => {
+    onTokenExpired(() => {
+      console.log('🔒 Token expired, logging out');
+      performLogout();
+    });
+  }, []);
+
+  // Persist user to localStorage + update state
+  const saveUser = (user: any) => {
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
+  };
+
+  const clearSavedUser = () => {
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem(LS_USER_KEY);
+  };
+
+  const performLogout = () => {
+    if (currentUser) {
+      localStorage.removeItem(`isa_providers_sent_context_${currentUser._id}`);
+    }
+    clearSavedUser();
+    clearTokens();
+    navigate('/');
+  };
+
+  // Check authentication on mount
+  useEffect(() => {
+    const initAuth = async () => {
+      // Try to restore session from refresh token
+      const refreshToken = getRefreshToken();
+      if (refreshToken) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          // Token refreshed, now get user from localStorage
+          const savedUser = localStorage.getItem(LS_USER_KEY);
+          if (savedUser) {
+            try {
+              const user = JSON.parse(savedUser);
+              saveUser(user);
+              // Validate user data in background
+              authClient.getUser(user._id).then((result) => {
+                if (result && result.user) {
+                  const updatedUser = { ...user, ...result.user, _id: user._id };
+                  saveUser(updatedUser);
+                  localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                }
+              }).catch(() => {});
+            } catch (e) {
+              clearSavedUser();
+              clearTokens();
+            }
+          }
+        }
+      } else {
+        // No refresh token - check if we have a saved user (legacy)
+        const savedUser = localStorage.getItem(LS_USER_KEY);
+        if (savedUser) {
+          // No token, but user exists - legacy session without JWT
+          // We'll let them stay logged in but they won't have token auth
+          try {
+            const user = JSON.parse(savedUser);
+            saveUser(user);
+          } catch (e) {
+            localStorage.removeItem(LS_USER_KEY);
+          }
+        }
+      }
+
+      // First launch setup
       const hasLaunchedBefore = localStorage.getItem(LS_FIRST_LAUNCH_KEY);
-      
       if (isElectron && !hasLaunchedBefore) {
         setShowSetupLoader(true);
         setSetupCountdown(8);
         localStorage.setItem(LS_FIRST_LAUNCH_KEY, 'true');
       }
-      
-      if (savedUser) {
-        try {
-          const user = JSON.parse(savedUser);
-          setCurrentUser(user);
-          setIsAuthenticated(true);
-          
-          authClient.getUser(user._id).then((result) => {
-            if (result && result.user) {
-              const currentSaved = localStorage.getItem(LS_USER_KEY);
-              if (currentSaved) {
-                const current = JSON.parse(currentSaved);
-                if (current.deepgramLanguage !== user.deepgramLanguage || current.deepgramKeyterms !== user.deepgramKeyterms) {
-                  return;
-                }
-              }
-              const updatedUser = { ...user, ...result.user, _id: user._id };
-              setCurrentUser(updatedUser);
-              localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
-            }
-          }).catch((e) => {
-            console.error('Background validation error:', e);
-          });
-        } catch (e) {
-          console.error('Error loading user:', e);
-          localStorage.removeItem(LS_USER_KEY);
-        }
-      }
+
+      setAuthChecked(true);
     };
-    
-    loadUser();
-    
+
+    initAuth();
+  }, []);
+
+  // Listen for auth success from SignInPage (custom event)
+  useEffect(() => {
+    const handleAuthEvent = (event: any) => {
+      const { user, accessToken, refreshToken } = event.detail;
+      if (accessToken) setAccessToken(accessToken);
+      if (refreshToken) setRefreshToken(refreshToken);
+      saveUser(user);
+      navigate('/service');
+    };
+
+    window.addEventListener('user-auth-success', handleAuthEvent as EventListener);
+    return () => {
+      window.removeEventListener('user-auth-success', handleAuthEvent as EventListener);
+    };
+  }, [navigate]);
+
+  // Listen for token/shortcut updates
+  useEffect(() => {
     const handleTokenUpdate = (event: any) => {
       const { tokens } = event.detail;
       setCurrentUser((prevUser: any) => {
@@ -88,7 +181,7 @@ const AppRouterContent: React.FC = () => {
         return updatedUser;
       });
     };
-    
+
     const handleShortcutUpdate = (event: any) => {
       const { shortcuts } = event.detail;
       setCurrentUser((prevUser: any) => {
@@ -98,37 +191,25 @@ const AppRouterContent: React.FC = () => {
         return updatedUser;
       });
     };
-    
+
     window.addEventListener('user-tokens-updated', handleTokenUpdate as EventListener);
     window.addEventListener('user-shortcuts-updated', handleShortcutUpdate as EventListener);
-    
+
     return () => {
       window.removeEventListener('user-tokens-updated', handleTokenUpdate as EventListener);
       window.removeEventListener('user-shortcuts-updated', handleShortcutUpdate as EventListener);
     };
   }, []);
 
-  // Listen for auth success from SignInPage (custom event)
-  useEffect(() => {
-    const handleAuthEvent = (event: any) => {
-      const { user } = event.detail;
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      navigate('/service');
-    };
-    
-    window.addEventListener('user-auth-success', handleAuthEvent as EventListener);
-    return () => {
-      window.removeEventListener('user-auth-success', handleAuthEvent as EventListener);
-    };
-  }, [navigate]);
-
-  const handleAuthSuccess = (user: any) => {
-    setCurrentUser(user);
-    setIsAuthenticated(true);
-    localStorage.setItem(LS_USER_KEY, JSON.stringify(user));
-    // Redirect to /service after successful auth
+  const handleAuthSuccess = (user: any, accessToken?: string, refreshToken?: string) => {
+    if (accessToken) setAccessToken(accessToken);
+    if (refreshToken) setRefreshToken(refreshToken);
+    saveUser(user);
     navigate('/service');
+  };
+
+  const handleLogout = () => {
+    performLogout();
   };
 
   useEffect(() => {
@@ -143,16 +224,6 @@ const AppRouterContent: React.FC = () => {
       }, 500);
     }
   }, [showSetupLoader, setupCountdown]);
-
-  const handleLogout = () => {
-    if (currentUser) {
-      localStorage.removeItem(`isa_providers_sent_context_${currentUser._id}`);
-    }
-    setCurrentUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem(LS_USER_KEY);
-    navigate('/');
-  };
 
   const handleNewSession = async () => {
     if (!currentUser) return;
@@ -177,13 +248,12 @@ const AppRouterContent: React.FC = () => {
         contextMessages: currentUser.settings?.contextMessages ?? 5,
         apiKeys: currentUser.settings?.apiKeys || {}
       };
-      
+
       await authClient.updateSettings(currentUser._id, resetSettings);
-      
+
       try {
-        await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
+        await apiClient('/auth/deepgram-keyterms', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: currentUser._id, deepgramKeyterms: '' })
         });
       } catch (e) {}
@@ -204,6 +274,11 @@ const AppRouterContent: React.FC = () => {
       setShowErrorModal(true);
     }
   };
+
+  // Don't render until auth check completes (prevents flash)
+  if (!authChecked && !showSetupLoader) {
+    return null;
+  }
 
   return (
     <>
@@ -250,7 +325,7 @@ const AppRouterContent: React.FC = () => {
           <div className="bg-white/90 dark:bg-slate-900/40 backdrop-blur-xl border-2 border-blue-500/30 dark:border-blue-500/50 rounded-2xl p-8 max-w-md mx-4 shadow-2xl dark:shadow-[0_20px_70px_rgba(59,130,246,0.3)] animate-scaleIn">
             <div className="text-center mb-6">
               <div className="text-5xl mb-4">🔄</div>
-              <h3 className="text-2xl font-bold text-black dark:text-white mb-2">Start New Interview Session?</h3>
+              <h3 className="text-2xl font-bold text-black dark:text-white mb-2">Start New Meeting Session?</h3>
             </div>
             <div className="text-slate-700 dark:text-slate-200 mb-6 space-y-2">
               <p className="text-sm font-medium">This will:</p>
@@ -278,7 +353,7 @@ const AppRouterContent: React.FC = () => {
             <div className="text-center">
               <div className="text-5xl mb-4">✅</div>
               <h3 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">Session Cleared!</h3>
-              <p className="text-slate-700 dark:text-slate-200 text-sm">Starting fresh interview session...</p>
+              <p className="text-slate-700 dark:text-slate-200 text-sm">Starting fresh meeting session...</p>
             </div>
           </div>
         </div>
@@ -337,7 +412,7 @@ const AppRouterContent: React.FC = () => {
             <Route path="/features" element={<><Navbar user={currentUser} onLogout={handleLogout} /><FeaturesPage /></>} />
             <Route path="/about" element={<><Navbar user={currentUser} onLogout={handleLogout} /><AboutPage /></>} />
             <Route path="/contact" element={<><Navbar user={currentUser} onLogout={handleLogout} /><ContactPage /></>} />
-            <Route path="/pricing" element={<><Navbar user={currentUser} onLogout={handleLogout} /><PricingPage /><Footer /></>} />
+            <Route path="/pricing" element={<><Navbar user={currentUser} onLogout={handleLogout} /><PricingPage user={currentUser} /></>} />
 
             {/* Dedicated Sign In / Sign Up page */}
             <Route path="/signin" element={<SignInPage />} />

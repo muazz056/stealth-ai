@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import StealthModal from './components/StealthModal';
+import { APP_CONFIG } from './src/config';
 
 const MainApp: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
@@ -76,8 +77,8 @@ const MainApp: React.FC = () => {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-4 text-blue-400">Interview Assistant</h1>
-          <p className="text-gray-300">Setup your AI-powered interview assistant</p>
+          <h1 className="text-4xl font-bold mb-4 text-blue-400">{APP_CONFIG.NAME}</h1>
+          <p className="text-gray-300">Setup your AI-powered {APP_CONFIG.NAME}</p>
         </div>
 
         {/* API Key Setup */}
@@ -153,7 +154,7 @@ const MainApp: React.FC = () => {
 
         {/* Launch Button */}
         <div className="bg-gray-800 rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4 text-green-400">4. Launch Stealth Assistant</h2>
+          <h2 className="text-xl font-semibold mb-4 text-green-400">4. Launch {APP_CONFIG.NAME}</h2>
           <button
             onClick={launchStealthPip}
             disabled={!apiKey.trim() || microphoneTest !== 'success'}

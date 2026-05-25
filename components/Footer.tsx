@@ -56,9 +56,9 @@ const Footer: React.FC = () => {
           <div>
             <h3 className="text-black dark:text-white font-bold mb-3 sm:mb-4 text-sm sm:text-base">Connect</h3>
             <ul className="space-y-2">
-              <li><a href="#" className="text-slate-600 dark:text-slate-500 hover:text-black dark:hover:text-white text-xs sm:text-sm transition-colors">GitHub</a></li>
+              <li><a href="#" className="text-slate-600 dark:text-slate-500 hover:text-black dark:hover:text-white text-xs sm:text-sm transition-colors">Instagram</a></li>
+              <li><a href="#" className="text-slate-600 dark:text-slate-500 hover:text-black dark:hover:text-white text-xs sm:text-sm transition-colors">Facebook</a></li>
               <li><a href="#" className="text-slate-600 dark:text-slate-500 hover:text-black dark:hover:text-white text-xs sm:text-sm transition-colors">Twitter</a></li>
-              <li><a href="#" className="text-slate-600 dark:text-slate-500 hover:text-black dark:hover:text-white text-xs sm:text-sm transition-colors">Discord</a></li>
             </ul>
           </div>
         </div>
@@ -68,16 +68,16 @@ const Footer: React.FC = () => {
           <div className="my-8 sm:my-12 text-center">
             <button
               onClick={handleDownloadClick}
-              className="inline-block px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl transition-all transform hover:scale-105"
+              className="inline-block w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold text-base sm:text-lg shadow-xl hover:shadow-2xl transition-all transform hover:scale-105"
             >
-              🚀 Download Stealth Assist for Windows
+              🚀 Download {APP_CONFIG.NAME} for Windows
             </button>
           </div>
         )}
         
         <div className="border-t border-slate-200 dark:border-slate-800 pt-6 sm:pt-8 text-center">
           <p className="text-slate-500 dark:text-slate-600 text-xs sm:text-sm">
-            © 2024 Interview Stealth Assist. All rights reserved. Use ethically and responsibly.
+            © 2024 {APP_CONFIG.NAME}. All rights reserved. Use ethically and responsibly.
           </p>
         </div>
       </div>

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnswerMode, TranscriptionItem, AIResponse } from '../types';
 import { useStealthWindow } from '../src/stealth/useStealthWindow';
+import { APP_CONFIG } from '../src/config';
 
 interface OverlayProps {
   isVisible: boolean;
@@ -78,7 +79,7 @@ const Overlay: React.FC<OverlayProps> = ({
       >
         <div className="flex items-center gap-2">
           <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Stealth Assist</span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">{APP_CONFIG.NAME}</span>
         </div>
         <div className="flex gap-2">
           <button
@@ -101,7 +102,7 @@ const Overlay: React.FC<OverlayProps> = ({
               <div className="flex flex-col gap-1">
                 {transcription.slice(-2).map((t) => (
                   <div key={t.id} className={t.role === 'user' ? 'opacity-60' : ''}>
-                    <span className="font-bold text-blue-400 mr-1 uppercase text-[9px]">{t.role === 'interviewer' ? 'INT' : 'YOU'}:</span>
+                    <span className="font-bold text-blue-400 mr-1 uppercase text-[9px]">{t.role === 'interviewer' ? 'MEET' : 'YOU'}:</span>
                     {t.text}
                   </div>
                 ))}

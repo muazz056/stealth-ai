@@ -17,6 +17,8 @@ import { authClient } from './src/utils/authClient';
 import { messagesClient } from './src/utils/messagesClient';
 import { tokensClient } from './src/utils/tokensClient';
 import { resolveDeepgramConfig } from './src/utils/deepgramChainClient';
+import { apiClient } from './src/utils/apiClient';
+import { APP_CONFIG } from './src/config';
 import { 
   getDefaultShortcuts, 
   ShortcutsState, 
@@ -680,10 +682,12 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         if (aiMsg) {
           // Extract just the question from the full prompt
           const fullText = userMsg.parts?.[0]?.text || (userMsg as any).content || '';
-          const questionMatch = fullText.match(/Interview Question: "(.+?)"/);
+          const questionMatch = fullText.match(/(?:Interview|Meeting) Question: "(.+?)"/);
           const question = questionMatch ? questionMatch[1] : fullText;
 
-          const answer = aiMsg.parts?.[0]?.text || (aiMsg as any).content || '';
+          let answer = aiMsg.parts?.[0]?.text || (aiMsg as any).content || '';
+          // Strip QUESTION:/ANSWER: prefixes from saved answers
+          answer = answer.replace(/^QUESTION:\s*.+\n?/i, '').replace(/^ANSWER:\s*/i, '').trim();
 
           pairs.push({ question, answer });
         }
@@ -2168,7 +2172,7 @@ QUESTION_CLASSIFICATION:
 Respond in ${langDisplay}.]`;
       console.log('📝 Keyword note:', keywordNote ? 'ADDED' : 'EMPTY');
       
-      const fullPrompt = `${keywordNote}${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
+      const fullPrompt = `${keywordNote}${contextPrompt}\n\nMeeting Question: "${questionToAnswer}"\n\nProvide a professional answer.`;
 
       console.log('📊 Context Prompt Stats:');
       console.log('  - Base Prompt:', basePrompt.length, 'chars');
@@ -2180,6 +2184,7 @@ Respond in ${langDisplay}.]`;
       console.log('🎯 Context messages limit:', contextMessages, 'pairs (', contextMessages * 2, 'messages)');
 
       let streamedText = '';
+      let formatStripped = false;
 
       // Apply sliding window: keep only recent context
       const maxMessages = contextMessages * 2; // Each Q&A pair = 2 messages
@@ -2254,7 +2259,15 @@ Respond in ${langDisplay}.]`;
               }
               if (parsed.text) {
                 streamedText += parsed.text;
-                setAiResponse(streamedText); // Update UI in real-time
+                // Strip QUESTION:/ANSWER: prefixes that some AI models add
+                if (!formatStripped) {
+                  const qMatch = streamedText.match(/^QUESTION:\s*.+\n?/i);
+                  if (qMatch) {
+                    formatStripped = true;
+                    streamedText = streamedText.replace(/^QUESTION:\s*.+\n?/i, '').replace(/^ANSWER:\s*/i, '').trim();
+                  }
+                }
+                setAiResponse(streamedText);
               }
             } catch (e) {
               // Skip invalid JSON
@@ -2263,6 +2276,9 @@ Respond in ${langDisplay}.]`;
         }
       }
 
+      if (formatStripped) {
+        streamedText = streamedText.replace(/^ANSWER:\s*/i, '').trim();
+      }
       console.log('✅ Streaming complete, total chars:', streamedText.length);
 
       // Save to history (Gemini format for storage)
@@ -2450,7 +2466,7 @@ Respond in ${langDisplay}.]`;
         )}
 
         {/* Section 1: Voice Assist Configuration */}
-        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Voice Assist</h2>
             {typeof window !== 'undefined' && (window as any).require && (
@@ -2477,7 +2493,7 @@ Respond in ${langDisplay}.]`;
                 setDeepgramLanguage(val);
                 // Save immediately and restart voice if listening
                 try {
-                  const langRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
+                  const langRes = await apiClient('/auth/deepgram-language', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, deepgramLanguage: val })
@@ -2521,7 +2537,7 @@ Respond in ${langDisplay}.]`;
               onChange={(val) => setSettings(prev => ({ ...prev, responseLanguage: val }))}
               onBlur={async (val) => {
                 try {
-                  const res = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                  const res = await apiClient('/auth/settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: val } })
@@ -2569,9 +2585,8 @@ Respond in ${langDisplay}.]`;
               onClick={async () => {
                 try {
                   // Save transcription language
-                  const langRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
+                  const langRes = await apiClient('/auth/deepgram-language', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, deepgramLanguage })
                   });
                   const langResult = await langRes.json();
@@ -2581,9 +2596,8 @@ Respond in ${langDisplay}.]`;
                   }
 
                   // Save response language
-                  const settingsRes = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                  const settingsRes = await apiClient('/auth/settings', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: settings.responseLanguage } })
                   });
                   const settingsResult = await settingsRes.json();
@@ -2594,9 +2608,8 @@ Respond in ${langDisplay}.]`;
                   }
 
                   // Save keywords
-                  const keyRes = await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
+                  const keyRes = await apiClient('/auth/deepgram-keyterms', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, deepgramKeyterms })
                   });
                   const keyResult = await keyRes.json();
@@ -2641,10 +2654,10 @@ Respond in ${langDisplay}.]`;
           </div>
         </div>
 
-        {/* Section 2: Interview Context (2-Column Layout) */}
-        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
+        {/* Section 2: Meeting Context (2-Column Layout) */}
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
           <div className="mb-6">
-            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Interview Context</h2>
+            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Meeting Context</h2>
             <p className="text-xs text-slate-500 dark:text-slate-500">Provide information for personalized AI responses</p>
           </div>
 
@@ -2695,9 +2708,8 @@ Respond in ${langDisplay}.]`;
                   onBlur={() => {
                     // Auto-save on blur
                     if (user._id) {
-                      fetch(`${API_BASE_URL}/api/auth/settings`, {
+                      apiClient('/auth/settings', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ userId: user._id, settings: { jobDescription } })
                       }).catch(err => console.error('Failed to save JD:', err));
                     }
@@ -2722,9 +2734,8 @@ Respond in ${langDisplay}.]`;
                   onBlur={() => {
                     // Auto-save on blur
                     if (user._id) {
-                      fetch(`${API_BASE_URL}/api/auth/settings`, {
+                      apiClient('/auth/settings', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ userId: user._id, settings: { companyInfo } })
                       }).catch(err => console.error('Failed to save Company Info:', err));
                     }
@@ -2811,7 +2822,7 @@ Respond in ${langDisplay}.]`;
           </div>
 
           {/* Generate Summaries Button + Manual Save */}
-          <div className="mt-6 bg-slate-50/80 dark:bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700/50 p-5 space-y-3">
+          <div className="mt-6 bg-slate-50/80 dark:bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 sm:p-5 space-y-3">
                   <button 
               onClick={handleGenerateSummaries}
               disabled={isGeneratingSummaries}
@@ -2858,14 +2869,14 @@ Respond in ${langDisplay}.]`;
             </div>
 
         {/* Section 3: Context Messages */}
-        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
           <div className="mb-6">
             <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Context Configuration</h2>
             <p className="text-xs text-slate-500 dark:text-slate-500">Control how much conversation history the AI receives</p>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <label className="text-sm font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">Q&A Pairs:</label>
               <input
                 type="number"
@@ -2878,12 +2889,12 @@ Respond in ${langDisplay}.]`;
                 }}
                 className="w-20 px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-black dark:text-white text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
               />
-              <span className="text-xs text-slate-500 dark:text-slate-500">(= {contextMessages * 2} messages total)</span>
+              <span className="text-xs text-slate-500 dark:text-slate-500 hidden xs:inline">(= {contextMessages * 2} messages total)</span>
                 </div>
 
             <div className="p-4 bg-blue-50/50 dark:bg-blue-500/5 rounded-xl border border-blue-100 dark:border-blue-500/10">
               <p className="text-xs text-slate-600 dark:text-slate-400">
-                <strong>Recommended:</strong> 5-10 for quick interviews, 15-20 for deep technical discussions
+                <strong>Recommended:</strong> 5-10 for quick meetings, 15-20 for deep technical discussions
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
                 Lower = Faster responses &bull; Higher = More context & continuity
@@ -2929,7 +2940,7 @@ Respond in ${langDisplay}.]`;
 
         {/* Section 4: Shortcuts (Electron Only) */}
         {isElectron && (
-        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-6">
+        <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
           <div className="flex items-center justify-between mb-6">
                   <div>
               <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Keyboard Shortcuts</h2>
@@ -2984,21 +2995,21 @@ Respond in ${langDisplay}.]`;
 
         {/* Footer */}
         <footer className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 text-center">
-          <p className="text-sm text-slate-600 dark:text-slate-500 uppercase tracking-widest">Stealth Assist • Ready for Action</p>
+          <p className="text-sm text-slate-600 dark:text-slate-500 uppercase tracking-widest">{APP_CONFIG.NAME} • Ready for Action</p>
         </footer>
             </div>
             
       {/* Live Transcription & Response */}
       <div className="space-y-4">
             {/* Transcription Box */}
-            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-5">
+            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-3 sm:p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2.5">
                   <h3 className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Ask a Question</h3>
                   {isListening && (
                     <div className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 border border-red-500/20 rounded-full">
                       <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
-                      <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">REC</span>
+                      <span className="text-[11px] font-bold text-red-500 uppercase tracking-wider">REC</span>
                     </div>
                   )}
                 </div>
@@ -3006,7 +3017,7 @@ Respond in ${langDisplay}.]`;
                   <button 
                     onClick={handleStopResponse}
                     disabled={!isGenerating}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 ${
+                    className={`px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all duration-200 ${
                       isGenerating 
                         ? 'bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20' 
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-700'
@@ -3017,7 +3028,7 @@ Respond in ${langDisplay}.]`;
                   </button>
                   <button 
                     onClick={handleClear} 
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-white"
+                    className="px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all duration-200 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-white"
                   >
                     Clear
                   </button>
@@ -3057,13 +3068,13 @@ Respond in ${langDisplay}.]`;
                     }
                   }}
                   rows={1}
-                  className={`flex-1 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-hidden min-h-[48px] max-h-[200px] placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-all ${
+                  className={`flex-1 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-y-auto min-h-[48px] max-h-[30vh] placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-all [&::-webkit-scrollbar]:hidden [scrollbar-width:none] ${
                     isListening ? 'ring-2 ring-red-500/30' : ''
                   }`}
                   style={{ lineHeight: '1.5' }}
                 />
 
-                <div className="flex flex-row sm:flex-col gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button 
                     onClick={isListening ? handleStopListen : handleStartListen}
                     disabled={isGenerating}
@@ -3122,7 +3133,7 @@ Respond in ${langDisplay}.]`;
                 </div>
 
             {/* AI Response */}
-            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-5 min-h-[250px]">
+            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-3 sm:p-5 min-h-[180px] md:min-h-[250px]">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">
                   {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Response'}
@@ -3134,7 +3145,7 @@ Respond in ${langDisplay}.]`;
                   <button 
                       onClick={() => setCurrentPairIndex(Math.max(0, currentPairIndex - 1))}
                       disabled={currentPairIndex === 0}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${
+                      className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 ${
                         currentPairIndex === 0
                           ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md'
@@ -3146,7 +3157,7 @@ Respond in ${langDisplay}.]`;
                   <button 
                       onClick={() => setCurrentPairIndex(Math.min(qaPairs.length - 1, currentPairIndex + 1))}
                       disabled={currentPairIndex === qaPairs.length - 1}
-                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                      className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
                         currentPairIndex === qaPairs.length - 1
                           ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -3275,11 +3286,11 @@ Respond in ${langDisplay}.]`;
       {/* API Error Modal */}
       {apiError && (
         <div 
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999]"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
           onClick={() => setApiError(null)}
         >
           <div 
-            className="bg-white dark:bg-slate-900 border border-red-300 dark:border-red-500/60 rounded-lg px-4 py-3 w-[280px] max-w-[90vw] shadow-lg shadow-red-500/20"
+            className="bg-white dark:bg-slate-900 border border-red-300 dark:border-red-500/60 rounded-lg px-4 py-3 w-full max-w-[90vw] sm:max-w-[320px] shadow-lg shadow-red-500/20"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
@@ -3299,7 +3310,7 @@ Respond in ${langDisplay}.]`;
               </div>
               <button
                 onClick={() => setApiError(null)}
-                className="text-slate-400 hover:text-white text-sm"
+                className="text-slate-400 hover:text-white text-sm p-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
                 aria-label="Close"
               >
                 ✕
@@ -3330,7 +3341,7 @@ Respond in ${langDisplay}.]`;
       >
         <div className="space-y-3">
           <p className="text-slate-600 dark:text-slate-300 text-sm">
-            You've used all <strong className="text-white">15 free credits</strong>.
+            You've used all <strong className="text-white">10 free credits</strong>.
           </p>
           <p className="text-slate-600 dark:text-slate-300 text-sm">
             <strong className="text-amber-400 dark:text-amber-400">Upgrade to Pro</strong> to get unlimited credits and unlock premium features!

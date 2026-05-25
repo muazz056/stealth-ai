@@ -82,7 +82,7 @@ const StealthModal: React.FC<StealthModalProps> = ({
       onClick={onClose}
     >
       <div
-        className={`relative w-full max-w-md bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border ${styles.border} rounded-2xl p-8 shadow-2xl ${styles.shadowColor} transform transition-all duration-200 scale-100`}
+        className={`relative w-full max-w-md bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border ${styles.border} rounded-2xl p-6 sm:p-8 shadow-2xl ${styles.shadowColor} transform transition-all duration-200 scale-100`}
         onClick={(e) => e.stopPropagation()}
       >
         {icon && (
@@ -95,7 +95,7 @@ const StealthModal: React.FC<StealthModalProps> = ({
             {title}
           </h3>
         )}
-        <div className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-7 text-center">
+        <div className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-7 text-center max-h-[50vh] overflow-y-auto">
           {children}
         </div>
         <div className="flex flex-col gap-3">

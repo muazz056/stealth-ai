@@ -10,6 +10,7 @@ import 'highlight.js/styles/github-dark.css'; // Code highlighting theme
 import 'katex/dist/katex.min.css'; // Math rendering styles
 import { messagesClient } from './src/utils/messagesClient';
 import { tokensClient } from './src/utils/tokensClient';
+import { apiClient } from './src/utils/apiClient';
 import { resolveDeepgramConfig, shouldUseDeepgram } from './src/utils/deepgramChainClient';
 import { getDefaultShortcuts, ShortcutConfig, ShortcutAction } from './src/utils/shortcutsManager';
 import StealthModal from './components/StealthModal';
@@ -696,7 +697,7 @@ const OverlayApp: React.FC = () => {
       if (!userStr) return;
       const parsed = JSON.parse(userStr);
       if (!parsed?._id) return;
-      const res = await fetch(`${API_BASE_URL}/api/auth/user/${parsed._id}`);
+      const res = await apiClient(`/auth/user/${parsed._id}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data?.success && data.user) {
@@ -1187,10 +1188,12 @@ const OverlayApp: React.FC = () => {
         if (aiMsg) {
           // Extract just the question from the full prompt
           const fullText = userMsg.parts?.[0]?.text || (userMsg as any).content || '';
-          const questionMatch = fullText.match(/Interview Question: "(.+?)"/);
+          const questionMatch = fullText.match(/(?:Interview|Meeting) Question: "(.+?)"/);
           const question = questionMatch ? questionMatch[1] : fullText;
 
-          const answer = aiMsg.parts?.[0]?.text || (aiMsg as any).content || '';
+          let answer = aiMsg.parts?.[0]?.text || (aiMsg as any).content || '';
+          // Strip QUESTION:/ANSWER: prefixes from saved answers
+          answer = answer.replace(/^QUESTION:\s*.+\n?/i, '').replace(/^ANSWER:\s*/i, '').trim();
 
           pairs.push({ question, answer });
         }
@@ -2221,6 +2224,7 @@ Respond in ${langDisplay}.]`
       const fullPrompt = `${keywordNote}${contextPrompt}\n\nInterview Question: "${questionToAnswer}"\n\nProvide a professional answer for this interview question.`;
 
       let streamedText = '';
+      let formatStripped = false;
 
       // Prepare messages in universal OpenAI format (backend converts for Gemini if needed)
       let apiMessages: any[] = [];
@@ -2289,7 +2293,14 @@ Respond in ${langDisplay}.]`
               }
               if (parsed.text) {
                 streamedText += parsed.text;
-                setAiResponse(streamedText); // Update UI in real-time
+                if (!formatStripped) {
+                  const qMatch = streamedText.match(/^QUESTION:\s*.+\n?/i);
+                  if (qMatch) {
+                    formatStripped = true;
+                    streamedText = streamedText.replace(/^QUESTION:\s*.+\n?/i, '').replace(/^ANSWER:\s*/i, '').trim();
+                  }
+                }
+                setAiResponse(streamedText);
               }
             } catch (e) {
               // Skip invalid JSON
@@ -2298,6 +2309,9 @@ Respond in ${langDisplay}.]`
         }
       }
 
+      if (formatStripped) {
+        streamedText = streamedText.replace(/^ANSWER:\s*/i, '').trim();
+      }
       console.log('✅ Overlay: Streaming complete, total chars:', streamedText.length);
 
       // Save to history (Gemini format for storage)
@@ -2866,7 +2880,7 @@ ${companyInfoSummary}`;
                 ipcRenderer.send('toggle-overlay-minimize');
               }
             }}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-xs font-bold transition-all bg-blue-500/10 hover:bg-blue-500/30 text-blue-300 hover:text-white group border border-blue-400/20 hover:border-blue-400/50 backdrop-blur-sm"
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-xs font-bold transition-all bg-blue-500/10 hover:bg-blue-500/30 text-blue-300 hover:text-white group border border-blue-400/20 hover:border-blue-400/50 backdrop-blur-sm"
           >
             <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
@@ -2876,7 +2890,7 @@ ${companyInfoSummary}`;
           {/* Close Button */}
           <button 
             onClick={handleCloseOverlay}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-xs font-bold transition-all bg-red-500/10 hover:bg-red-500/40 text-red-300 hover:text-white group border border-red-400/20 hover:border-red-400/50 backdrop-blur-sm"
+            className="flex items-center justify-center w-11 h-11 rounded-lg text-xs font-bold transition-all bg-red-500/10 hover:bg-red-500/40 text-red-300 hover:text-white group border border-red-400/20 hover:border-red-400/50 backdrop-blur-sm"
           >
             <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -2949,7 +2963,7 @@ ${companyInfoSummary}`;
         })()}
         
         {/* Action Buttons */}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
           {/* Language Button (always visible) */}
           <button
             onClick={async () => {
@@ -2957,9 +2971,9 @@ ${companyInfoSummary}`;
               setLanguageModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
+            className="group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
             </svg>
             Language
@@ -2972,9 +2986,9 @@ ${companyInfoSummary}`;
               setKeywordsModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
+            className="group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
             Keywords
@@ -2985,7 +2999,7 @@ ${companyInfoSummary}`;
           <button
             onClick={handleAnalyzeScreen}
             disabled={isAnalyzing || isGenerating}
-            className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
+            className={`group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md ${
               isAnalyzing 
                 ? 'bg-purple-600/70 text-white animate-pulse' 
                 : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
@@ -2993,12 +3007,12 @@ ${companyInfoSummary}`;
             data-action="analyze-screen"
           >
             {isAnalyzing ? (
-              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
             ) : (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
@@ -3009,7 +3023,7 @@ ${companyInfoSummary}`;
           <button
             onClick={handleStopResponse}
             disabled={!isGenerating && !isAnalyzing}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${
+            className={`px-4 py-2 rounded-lg text-[11px] font-bold uppercase transition-all border ${
               isGenerating || isAnalyzing 
                 ? 'bg-amber-500/20 text-white hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
                 : 'bg-gray-800/50 text-white border-gray-700/30 cursor-not-allowed'
@@ -3020,7 +3034,7 @@ ${companyInfoSummary}`;
           
           <button 
             onClick={handleClear} 
-            className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
+            className="px-4 py-2 rounded-lg text-[11px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
           >
             Clear
           </button>
@@ -3062,7 +3076,7 @@ ${companyInfoSummary}`;
               }
             }}
             rows={1}
-            className={`w-full bg-gray-800/20 border border-blue-400/30 rounded-2xl px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/60 resize-none overflow-hidden min-h-[40px] max-h-[150px] backdrop-blur-lg shadow-inner ${
+            className={`w-full bg-gray-800/20 border border-blue-400/30 rounded-2xl px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/60 resize-none overflow-y-auto min-h-[40px] max-h-[40vh] backdrop-blur-lg shadow-inner [&::-webkit-scrollbar]:hidden [scrollbar-width:none] ${
               isListening ? 'opacity-90' : ''
             }`}
             style={{ lineHeight: '1.5' }}
@@ -3073,7 +3087,7 @@ ${companyInfoSummary}`;
             <button
               onClick={isListening ? handleStopListen : handleStartListen}
               disabled={isGenerating}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
+              className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
                 isListening
                   ? 'bg-red-500/40 hover:bg-red-500/60 text-white border-red-400/50 shadow-red-500/50'
                   : 'bg-green-500/40 hover:bg-green-500/60 text-white border-green-400/50 shadow-green-500/50'
@@ -3091,7 +3105,7 @@ ${companyInfoSummary}`;
                 handleGetAnswer();
               }}
               disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
+              className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
                 isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
                   ? 'opacity-50'
                   : ''
@@ -3129,7 +3143,7 @@ ${companyInfoSummary}`;
 
       {/* Browser Navigation Toolbar (only when browser is active) */}
       {browserMode && (
-        <div className="bg-blue-500/10 backdrop-blur-lg rounded-lg px-3 py-0.1 my-0.1 flex items-center justify-center gap-2 border border-blue-400/20">
+        <div className="bg-blue-500/10 backdrop-blur-lg rounded-lg px-3 py-1.5 my-1 flex flex-wrap items-center justify-center gap-1.5 border border-blue-400/20">
           {/* Back/Forward/Reload Buttons */}
           <button
             onClick={() => {
@@ -3138,7 +3152,7 @@ ${companyInfoSummary}`;
                 ipcRenderer.send('browser-navigate', 'back');
               }
             }}
-            className="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
+            className="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
           >
             ←
           </button>
@@ -3149,7 +3163,7 @@ ${companyInfoSummary}`;
                 ipcRenderer.send('browser-navigate', 'forward');
               }
             }}
-            className="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
+            className="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
           >
             →
           </button>
@@ -3160,7 +3174,7 @@ ${companyInfoSummary}`;
                 ipcRenderer.send('browser-navigate', 'reload');
               }
             }}
-            className="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
+            className="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/40 text-white rounded text-xs font-bold transition-all backdrop-blur-sm border border-gray-400/20"
           >
             ⟳
           </button>
@@ -3171,31 +3185,31 @@ ${companyInfoSummary}`;
           {/* Provider Quick Links - Order: Google, GPT, Gemini, Claude, AI Studio */}
           <button
             onClick={() => handleNavigateToProvider('https://www.google.com', 'Google')}
-            className="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/40 text-gray-300 rounded text-[10px] font-bold transition-all"
+            className="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/40 text-gray-300 rounded text-[11px] font-bold transition-all"
           >
             Google
           </button>
           <button
             onClick={() => handleNavigateToProvider('https://chatgpt.com', 'ChatGPT')}
-            className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 rounded text-[10px] font-bold transition-all"
+            className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 rounded text-[11px] font-bold transition-all"
           >
             GPT
           </button>
           <button
             onClick={() => handleNavigateToProvider('https://gemini.google.com', 'Gemini')}
-            className="px-2 py-1 bg-green-600/20 hover:bg-green-600/40 text-green-300 rounded text-[10px] font-bold transition-all"
+            className="px-3 py-1.5 bg-green-600/20 hover:bg-green-600/40 text-green-300 rounded text-[11px] font-bold transition-all"
           >
             Gemini
           </button>
           <button
             onClick={() => handleNavigateToProvider('https://claude.ai', 'Claude')}
-            className="px-2 py-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 rounded text-[10px] font-bold transition-all"
+            className="px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 rounded text-[11px] font-bold transition-all"
           >
             Claude
           </button>
           <button
             onClick={() => handleNavigateToProvider('https://aistudio.google.com/app/prompts/new_chat', 'AI Studio')}
-            className="px-2 py-1 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded text-[10px] font-bold transition-all"
+            className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded text-[11px] font-bold transition-all"
           >
             AI Studio
           </button>
@@ -3206,7 +3220,7 @@ ${companyInfoSummary}`;
           {/* Context Transfer Button */}
           <button
             onClick={handleForceContextTransfer}
-            className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded text-[10px] font-bold transition-all flex items-center gap-1"
+            className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded text-[11px] font-bold transition-all flex items-center gap-1"
           >
             <span>📋</span>
             <span>Context Transfer</span>
@@ -3357,7 +3371,7 @@ ${companyInfoSummary}`;
       {/* Language Selection Modal */}
       {languageModalOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-md shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-white text-lg font-bold">Deepgram Language</h3>
               <button
@@ -3392,14 +3406,9 @@ ${companyInfoSummary}`;
                       const userStr = localStorage.getItem(LS_USER_KEY);
                       if (userStr) {
                         const user = JSON.parse(userStr);
-                        const token = localStorage.getItem('token');
                         
-                        const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-language`, {
+                        const response = await apiClient('/auth/deepgram-language', {
                           method: 'PUT',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                          },
                           body: JSON.stringify({ 
                             userId: user._id,
                             deepgramLanguage: newLang 
@@ -3457,14 +3466,9 @@ ${companyInfoSummary}`;
                       const userStr = localStorage.getItem(LS_USER_KEY);
                       if (userStr) {
                         const user = JSON.parse(userStr);
-                        const token = localStorage.getItem('token');
                         
-                        const response = await fetch(`${API_BASE_URL}/api/auth/settings`, {
+                        const response = await apiClient('/auth/settings', {
                           method: 'PUT',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                          },
                           body: JSON.stringify({ 
                             userId: user._id,
                             settings: { ...user.settings, responseLanguage: lang }
@@ -3524,7 +3528,7 @@ ${companyInfoSummary}`;
       {/* Keywords Modal */}
       {keywordsModalOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-md shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-white text-lg font-bold">Important Keywords</h3>
               <button
@@ -3563,9 +3567,8 @@ ${companyInfoSummary}`;
                     const userStr = localStorage.getItem(LS_USER_KEY);
                     if (userStr) {
                       const user = JSON.parse(userStr);
-                      const response = await fetch(`${API_BASE_URL}/api/auth/deepgram-keyterms`, {
+                      const response = await apiClient('/auth/deepgram-keyterms', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ userId: user._id, deepgramKeyterms: currentKeyterms })
                       });
                       if (response.ok) {
@@ -3611,7 +3614,7 @@ ${companyInfoSummary}`;
       {/* Settings Confirmation Modal (Stealthy) */}
       {showSettingsConfirm && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-xs w-full shadow-2xl">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
             <p className="text-white text-center font-medium mb-6">Do you really wanna go to Settings?</p>
             <div className="flex gap-3">
               <button
@@ -3918,7 +3921,7 @@ ${companyInfoSummary}`;
           onClick={() => setShowProviderModal(false)}
         >
           <div 
-            className="bg-slate-900 border border-blue-500/60 rounded-xl p-6 w-[320px] max-w-[90vw] shadow-2xl shadow-blue-500/20"
+            className="bg-slate-900 border border-blue-500/60 rounded-xl p-6 w-full max-w-[90vw] sm:max-w-[320px] shadow-2xl shadow-blue-500/20"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-bold text-white mb-4">Select Browser Start Page</h3>
@@ -3974,7 +3977,7 @@ ${companyInfoSummary}`;
           }}
         >
           <div 
-            className="bg-slate-900 border border-red-500/60 rounded-lg px-4 py-3 w-[280px] max-w-[90vw] shadow-lg shadow-red-500/20"
+            className="bg-slate-900 border border-red-500/60 rounded-lg px-4 py-3 w-full max-w-[90vw] sm:max-w-[280px] shadow-lg shadow-red-500/20"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
@@ -4028,7 +4031,7 @@ ${companyInfoSummary}`;
       >
         <div className="space-y-3">
           <p className="text-slate-300 text-sm">
-            You've used all <strong className="text-white">15 free credits</strong>.
+            You've used all <strong className="text-white">10 free credits</strong>.
           </p>
           <p className="text-slate-300 text-sm">
             <strong className="text-amber-400">Upgrade to Pro</strong> to get unlimited credits and unlock premium features!

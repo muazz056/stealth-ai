@@ -10,12 +10,13 @@ const os = require('os');
 // executable's FileDescription metadata (set by electron-builder via rcedit).
 // ALWAYS call setAppUserModelId() BEFORE any window creation — this is what
 // Windows Task Manager reads for the "Processes" tab name and icon grouping.
-app.setAppUserModelId('com.interviewassist.stealthai.StealthAssist');
-process.title = 'Stealth Assist';
-app.name = 'Stealth Assist';
+const APP_NAME = process.env.APP_NAME || 'Stealth Assist';
+app.setAppUserModelId('com.meetingassist.stealthai.StealthAssist');
+process.title = APP_NAME;
+app.name = APP_NAME;
 // Rename Chromium child processes (GPU, utility, etc.) from 'Electron' to app name
-app.commandLine.appendSwitch('app-name', 'Stealth Assist');
-app.commandLine.appendSwitch('application-name', 'Stealth Assist');
+app.commandLine.appendSwitch('app-name', APP_NAME);
+app.commandLine.appendSwitch('application-name', APP_NAME);
 // requestSingleInstanceLock ensures only one instance and helps with Windows taskbar grouping
 const gotLock = app.requestSingleInstanceLock();
 app.on('second-instance', () => {
@@ -672,16 +673,11 @@ ipcMain.handle('auth-update-api-key', async (event, data) => {
 
 ipcMain.handle('auth-update-settings', async (event, data) => {
     console.log('🎯 IPC: auth-update-settings received:', data);
+    if (!authModule) {
+        return { success: false, message: 'Auth module not available' };
+    }
     try {
-        console.log('📡 Calling backend at:', `${BACKEND_URL}/api/auth/settings`);
-        const response = await fetch(`${BACKEND_URL}/api/auth/settings`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        console.log('📥 Backend response status:', response.status);
-        const result = await response.json();
-        console.log('✅ Backend response:', result);
+        const result = await authModule.updateUserSettings(data.userId, data.settings);
         return result;
     } catch (error) {
         console.error('❌ IPC auth-update-settings error:', error);
@@ -690,13 +686,11 @@ ipcMain.handle('auth-update-settings', async (event, data) => {
 });
 
 ipcMain.handle('auth-update-shortcuts', async (event, data) => {
+    if (!authModule) {
+        return { success: false, message: 'Auth module not available' };
+    }
     try {
-        const response = await fetch(`${BACKEND_URL}/api/auth/shortcuts`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        return await response.json();
+        return await authModule.updateUserShortcuts(data.userId, data.shortcuts);
     } catch (error) {
         return { success: false, message: error.message };
     }
@@ -1038,7 +1032,7 @@ function createMainWindow() {
         closable: true,
         focusable: true,
         show: true,
-        title: 'Stealth Assist',
+        title: APP_NAME,
         icon: APP_ICON,
         backgroundColor: '#1f2937',
         webPreferences: {
@@ -1208,7 +1202,7 @@ function createFloatingWidget() {
         frame: false,
         alwaysOnTop: true,
         skipTaskbar: true,
-        title: 'Stealth Assist',
+        title: APP_NAME,
         icon: APP_ICON,
         resizable: false,
         movable: true,
@@ -1398,7 +1392,7 @@ function createOverlayWindow() {
         closable: true,
         focusable: true,
         show: false, // ✅ Start hidden, show when ready to prevent glitches
-        title: 'Stealth Assist',
+        title: APP_NAME,
         icon: APP_ICON,
         backgroundColor: '#00000000', // ✅ Fully transparent background
         hasShadow: true, // Keep shadow for visibility
@@ -1760,7 +1754,7 @@ function createOverlayWindow() {
 
 app.whenReady().then(() => {
     // Re-assert process title after Electron initialization (may have been reset)
-    process.title = 'Stealth Assist';
+    process.title = APP_NAME;
     
     // Single instance lock: focus existing instance instead of launching new one
     if (!gotLock) {

@@ -1,9 +1,11 @@
 /**
  * Authentication Client
  * Handles both Electron IPC and HTTP REST API calls
+ * Now uses JWT tokens for secure API access
  */
 
 import { API_CONFIG } from '../config';
+import { apiClient, setAccessToken, setRefreshToken, clearTokens, getAccessToken } from './apiClient';
 
 const API_BASE_URL = API_CONFIG.API_URL;
 
@@ -16,23 +18,18 @@ export const isElectron = () => {
 // Generic auth call handler
 async function authCall(ipcEndpoint: string, httpPath: string, data: any, method: string = 'POST') {
   if (isElectron()) {
-    // Use Electron IPC
-    console.log(`🖥️ Using Electron IPC for: ${ipcEndpoint}`);
     const { ipcRenderer } = (window as any).require('electron');
-    return await ipcRenderer.invoke(ipcEndpoint, data);
+    // Pass the access token along with data for IPC auth
+    const token = getAccessToken();
+    return await ipcRenderer.invoke(ipcEndpoint, { ...data, _token: token });
   } else {
-    // Use HTTP REST API
-    console.log(`🌐 Using HTTP API for: ${httpPath}`);
-    const response = await fetch(`${API_BASE_URL}${httpPath}`, {
+    const response = await apiClient(httpPath, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: method !== 'GET' ? JSON.stringify(data) : undefined,
     });
     
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({ message: 'Request failed' }));
       throw new Error(error.message || 'Request failed');
     }
     
@@ -52,7 +49,47 @@ export const authClient = {
   },
 
   login: async (username: string, password: string) => {
-    return await authCall('auth-login', '/auth/login', { username, password }, 'POST');
+    if (isElectron()) {
+      const { ipcRenderer } = (window as any).require('electron');
+      return await ipcRenderer.invoke('auth-login', { username, password });
+    } else {
+      const response = await apiClient('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Request failed' }));
+        throw new Error(error.message || 'Request failed');
+      }
+      
+      const result = await response.json();
+      
+      // Store tokens on successful login
+      if (result.accessToken) {
+        setAccessToken(result.accessToken);
+      }
+      if (result.refreshToken) {
+        setRefreshToken(result.refreshToken);
+      }
+      
+      return result;
+    }
+  },
+
+  /**
+   * Store tokens after successful auth (called from AuthPage on Google OAuth, etc.)
+   */
+  storeTokens: (accessToken: string, refreshToken: string) => {
+    setAccessToken(accessToken);
+    setRefreshToken(refreshToken);
+  },
+
+  /**
+   * Log the user out (clear tokens)
+   */
+  logout: () => {
+    clearTokens();
   },
 
   updateApiKey: async (userId: string, provider: string, apiKey: string) => {
@@ -64,9 +101,9 @@ export const authClient = {
       const { ipcRenderer } = (window as any).require('electron');
       return await ipcRenderer.invoke('auth-get-user', { userId });
     } else {
-      const response = await fetch(`${API_BASE_URL}/auth/user/${userId}`);
+      const response = await apiClient(`/auth/user/${userId}`);
       if (!response.ok) {
-        const error = await response.json();
+        const error = await response.json().catch(() => ({ message: 'Failed to get user' }));
         throw new Error(error.message || 'Failed to get user');
       }
       return await response.json();
@@ -86,7 +123,30 @@ export const authClient = {
   },
 
   googleLogin: async (credential: string) => {
-    return await authCall('auth-google-login', '/auth/google', { credential }, 'POST');
+    if (isElectron()) {
+      const { ipcRenderer } = (window as any).require('electron');
+      return await ipcRenderer.invoke('auth-google-login', { credential });
+    } else {
+      const response = await apiClient('/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ credential }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Google login failed' }));
+        throw new Error(error.message || 'Google login failed');
+      }
+      
+      const result = await response.json();
+      
+      if (result.accessToken) {
+        setAccessToken(result.accessToken);
+      }
+      if (result.refreshToken) {
+        setRefreshToken(result.refreshToken);
+      }
+      
+      return result;
+    }
   }
 };
-

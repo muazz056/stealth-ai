@@ -11,6 +11,80 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+
+// JWT configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_change_me_in_production_2024';
+const JWT_ACCESS_EXPIRY = '15m';   // Access token: 15 minutes
+const JWT_REFRESH_EXPIRY = '7d';   // Refresh token: 7 days
+
+// Generate access token
+function generateAccessToken(user) {
+  return jwt.sign(
+    { userId: user._id.toString(), email: user.email, role: user.role || 'user' },
+    JWT_SECRET,
+    { expiresIn: JWT_ACCESS_EXPIRY }
+  );
+}
+
+// Generate refresh token
+function generateRefreshToken(user) {
+  return jwt.sign(
+    { userId: user._id.toString(), type: 'refresh' },
+    JWT_SECRET,
+    { expiresIn: JWT_REFRESH_EXPIRY }
+  );
+}
+
+// Auth middleware: verifies Bearer token and attaches req.user
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: 'Access token required' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: 'Token expired', code: 'TOKEN_EXPIRED' });
+    }
+    return res.status(401).json({ success: false, message: 'Invalid access token' });
+  }
+}
+
+// Verifies req.user.userId matches req.params.userId or req.body.userId
+function requireOwnUser(req, res, next) {
+  const requestUserId = req.params.userId || req.body.userId;
+  if (!requestUserId) {
+    return res.status(400).json({ success: false, message: 'User ID required' });
+  }
+  if (req.user.userId !== requestUserId) {
+    return res.status(403).json({ success: false, message: 'Access denied: user ID mismatch' });
+  }
+  next();
+}
+
+// Rate limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,                   // 20 attempts per window
+  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 120,                 // 120 requests per minute
+  message: { success: false, message: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Allowed email providers for registration
 const ALLOWED_EMAIL_PROVIDERS = [
   'gmail.com',
@@ -157,7 +231,20 @@ async function sendVerificationEmail(email, token, username) {
 
 const app = express();
 app.enable('trust proxy');
+const helmet = require('helmet');
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled for API; enable if serving HTML
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Apply rate limiters
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/google', authLimiter);
+app.use('/api/', apiLimiter); // General API rate limit
+
 const PORT = process.env.PORT || 3001;
+const APP_NAME = process.env.APP_NAME || 'Stealth Assist';
 
 const googleAuthResults = new Map();
 setInterval(() => {
@@ -442,7 +529,7 @@ process.on('SIGTERM', async () => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Interview Stealth Assist API is running' });
+  res.json({ status: 'ok', message: `${APP_NAME} API is running` });
 });
 
 // DB health check endpoint
@@ -594,7 +681,7 @@ OUTPUT:
       emailVerificationExpiry: tokenExpiry,
       role: 'user', // Default role: regular user
       plan: 'Free', // Free plan for new users
-      tokens: 15, // ONE-TIME: 15 free Credits on signup
+      tokens: 10, // ONE-TIME: 10 free credits on signup
       transcriptionSeconds: 0, // ONE-TIME: 25 min (1500s) free transcription limit
       createdAt: new Date(),
       apiKeys: {},
@@ -716,10 +803,16 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
+    // Generate JWT tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
     res.json({
       success: true,
       message: 'Login successful',
-      user: userWithoutPassword
+      user: userWithoutPassword,
+      accessToken,
+      refreshToken
     });
   } catch (error) {
     console.error('❌ [LOGIN] Full error:', error);
@@ -730,6 +823,43 @@ app.post('/api/auth/login', async (req, res) => {
       success: false,
       message: 'Login failed: ' + error.message
     });
+  }
+});
+
+// Refresh access token
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token required' });
+    }
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token. Please log in again.' });
+    }
+    if (decoded.type !== 'refresh') {
+      return res.status(401).json({ success: false, message: 'Invalid token type' });
+    }
+    const database = await connectDB();
+    const users = database.collection('users');
+    const user = await users.findOne({ _id: new ObjectId(decoded.userId) });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('❌ Token refresh error:', error);
+    res.status(500).json({ success: false, message: 'Token refresh failed' });
   }
 });
 
@@ -863,11 +993,8 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 });
 
 // Update API Key
-app.put('/api/auth/api-key', async (req, res) => {
+app.put('/api/auth/api-key', authMiddleware, requireOwnUser, async (req, res) => {
   try {
-    const database = await connectDB();
-    const users = database.collection('users');
-    
     const { userId, provider, apiKey } = req.body;
 
     if (!userId || !provider || !apiKey) {
@@ -993,7 +1120,7 @@ app.post('/api/auth/google', async (req, res) => {
         emailVerificationExpiry: null,
         role: 'user',
         plan: 'Free',
-        tokens: 15,
+        tokens: 10,
         createdAt: new Date(),
         apiKeys: {},
         selectedProvider: '',
@@ -1088,10 +1215,16 @@ QUESTION CLASSIFICATION:
       }
     }
 
+    // Generate JWT tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
     res.json({
       success: true,
       message: 'Google login successful',
-      user: { ...userWithoutPassword, picture }
+      user: { ...userWithoutPassword, picture },
+      accessToken,
+      refreshToken
     });
   } catch (error) {
     console.error('❌ Google login error:', error);
@@ -1200,7 +1333,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
         emailVerificationToken: null,
         emailVerificationExpiry: null,
         role: 'user', plan: 'Free',
-        tokens: 15,
+        tokens: 10,
         transcriptionSeconds: 0,
         createdAt: new Date(),
         apiKeys: {}, selectedProvider: '',
@@ -1213,7 +1346,9 @@ app.get('/api/auth/google/callback', async (req, res) => {
     }
 
     const { password: _, ...userData } = user;
-    const resultData = { success: true, user: { ...userData, picture } };
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+    const resultData = { success: true, user: { ...userData, picture }, accessToken, refreshToken };
 
     if (state) {
       googleAuthResults.set(state, { status: 'complete', result: resultData, ts: Date.now() });
@@ -1229,11 +1364,11 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
 function successPage(success, message) {
   return `<!DOCTYPE html>
-<html><head><title>${success ? 'Login Successful' : 'Login Failed'} - Stealth Assist</title>
+<html><head><title>${success ? 'Login Successful' : 'Login Failed'} - ${APP_NAME}</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#f1f5f9}h2{text-align:center}.icon{font-size:48px;text-align:center}</style></head>
 <body><div><div class="icon">${success ? '✅' : '❌'}</div>
 <h2>${success ? 'Signed in with Google!' : message || 'Sign-in failed'}</h2>
-<p style="text-align:center;color:#94a3b8">You may close this tab and return to Stealth Assist.</p></div></body></html>`;
+<p style="text-align:center;color:#94a3b8">You may close this tab and return to ${APP_NAME}.</p></div></body></html>`;
 }
 
 // Poll for Google OAuth result
@@ -1252,7 +1387,7 @@ app.get('/api/auth/google/result/:state', (req, res) => {
 });
 
 // Get User by ID
-app.get('/api/auth/user/:userId', async (req, res) => {
+app.get('/api/auth/user/:userId', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const users = database.collection('users');
@@ -1355,11 +1490,8 @@ app.post('/api/cv/parse', upload.single('cv'), async (req, res) => {
 });
 
 // Update Settings
-app.put('/api/auth/settings', async (req, res) => {
+app.put('/api/auth/settings', authMiddleware, requireOwnUser, async (req, res) => {
   try {
-    const database = await connectDB();
-    const users = database.collection('users');
-    
     const { userId, settings } = req.body;
 
     if (!userId || !settings) {
@@ -1405,11 +1537,8 @@ app.put('/api/auth/settings', async (req, res) => {
 });
 
 // Update Shortcuts
-app.put('/api/auth/shortcuts', async (req, res) => {
+app.put('/api/auth/shortcuts', authMiddleware, requireOwnUser, async (req, res) => {
   try {
-    const database = await connectDB();
-    const users = database.collection('users');
-    
     const { userId, shortcuts } = req.body;
 
     if (!userId || !shortcuts) {
@@ -1553,7 +1682,7 @@ app.put('/api/auth/voice-provider', async (req, res) => {
 });
 
 // Update Deepgram API Key
-app.put('/api/auth/deepgram-key', async (req, res) => {
+app.put('/api/auth/deepgram-key', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const users = database.collection('users');
@@ -1597,7 +1726,7 @@ app.put('/api/auth/deepgram-key', async (req, res) => {
 });
 
 // Update Deepgram Language
-app.put('/api/auth/deepgram-language', async (req, res) => {
+app.put('/api/auth/deepgram-language', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const users = database.collection('users');
@@ -1643,7 +1772,7 @@ app.put('/api/auth/deepgram-language', async (req, res) => {
 });
 
 // Update Deepgram Keyterms
-app.put('/api/auth/deepgram-keyterms', async (req, res) => {
+app.put('/api/auth/deepgram-keyterms', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const users = database.collection('users');
@@ -1845,7 +1974,7 @@ app.get('/api/auth/deepgram-chain-public', async (req, res) => {
 // ==================== MESSAGE/CONVERSATION ROUTES ====================
 
 // Save conversation message
-app.post('/api/messages/save', async (req, res) => {
+app.post('/api/messages/save', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const messages = database.collection('messages');
@@ -1882,7 +2011,7 @@ app.post('/api/messages/save', async (req, res) => {
 });
 
 // Save conversation history (bulk)
-app.post('/api/messages/save-history', async (req, res) => {
+app.post('/api/messages/save-history', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const messages = database.collection('messages');
@@ -1926,7 +2055,7 @@ app.post('/api/messages/save-history', async (req, res) => {
 });
 
 // Get conversation history
-app.get('/api/messages/history/:userId', async (req, res) => {
+app.get('/api/messages/history/:userId', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const messages = database.collection('messages');
@@ -1963,7 +2092,7 @@ app.get('/api/messages/history/:userId', async (req, res) => {
 });
 
 // Clear conversation history
-app.delete('/api/messages/clear/:userId', async (req, res) => {
+app.delete('/api/messages/clear/:userId', authMiddleware, requireOwnUser, async (req, res) => {
   try {
     const database = await connectDB();
     const messages = database.collection('messages');
@@ -2475,7 +2604,7 @@ SHORTEN the text - remove filler words. Keep only key points.
 Company Information:
 ${text}`;
     } else if (type === 'basePrompt') {
-      summaryPrompt = `Shorten these interview assistant instructions into key points (under 150 words):
+      summaryPrompt = `Shorten these meeting assistant instructions into key points (under 150 words):
 - Main purpose/goal
 - Response style guidelines
 - Key behavior instructions
@@ -2613,7 +2742,7 @@ ${text}`;
           body: JSON.stringify({
             model: 'meta-llama/llama-4-scout-17b-16e-instruct',
             messages: [
-              { role: 'system', content: 'You are a professional interview assistant.' },
+              { role: 'system', content: 'You are a professional meeting assistant.' },
               { role: 'user', content: summaryPrompt }
             ]
           })
@@ -3322,6 +3451,106 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Contact form endpoint - sends email via Brevo
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, subject, message } = req.body;
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({ success: false, message: 'All fields are required' });
+    }
+
+    if (!BREVO_API_KEY) {
+      return res.status(500).json({ success: false, message: 'Email service not configured' });
+    }
+    const senderEmail = process.env.BREVO_SENDER_EMAIL;
+    if (!senderEmail) {
+      return res.status(500).json({ success: false, message: 'Email sender not configured' });
+    }
+
+    const contactEmailData = JSON.stringify({
+      sender: { email: senderEmail, name: name },
+      to: [{ email: senderEmail }],
+      replyTo: { email, name },
+      subject: `[Contact Form] ${subject}`,
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin:0 auto;">
+          <h2 style="color: #333;">New Contact Form Submission</h2>
+          <table style="width:100%; border-collapse: collapse;">
+            <tr><td style="padding:8px; font-weight:bold; color:#555;">Name:</td><td style="padding:8px;">${name}</td></tr>
+            <tr><td style="padding:8px; font-weight:bold; color:#555;">Email:</td><td style="padding:8px;">${email}</td></tr>
+            <tr><td style="padding:8px; font-weight:bold; color:#555;">Subject:</td><td style="padding:8px;">${subject}</td></tr>
+          </table>
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0;" />
+          <h3 style="color:#333;">Message:</h3>
+          <p style="color:#555; line-height:1.6;">${message.replace(/\n/g, '<br>')}</p>
+        </div>
+      `
+    });
+
+    const result = await new Promise((resolve) => {
+      const options = {
+        hostname: 'api.brevo.com',
+        path: '/v3/smtp/email',
+        method: 'POST',
+        headers: {
+          'api-key': BREVO_API_KEY,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(contactEmailData)
+        }
+      };
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, data: JSON.parse(data) });
+          } catch { resolve({ status: res.statusCode, data }); }
+        });
+      });
+      req.on('error', (error) => resolve({ status: 500, data: { message: error.message } }));
+      req.write(contactEmailData);
+      req.end();
+    });
+
+    if (result.status === 200 || result.status === 201) {
+      res.json({ success: true, message: 'Message sent successfully' });
+    } else {
+      console.error('❌ Brevo API error for contact form:', result.data);
+      res.status(500).json({ success: false, message: 'Failed to send message' });
+    }
+  } catch (err) {
+    console.error('Contact form error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Download proxy endpoint - sets correct filename for cross-origin downloads
+const DOWNLOAD_FILENAME = process.env.DOWNLOAD_FILENAME || 'Stealth Assist Setup.exe';
+const DOWNLOAD_GITHUB_BASE = 'https://github.com';
+
+app.get('/api/download/windows', async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url || !url.startsWith(DOWNLOAD_GITHUB_BASE)) {
+      return res.status(400).json({ error: 'Invalid or missing download URL' });
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `GitHub responded with ${response.status}` });
+    }
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const contentLength = response.headers.get('content-length');
+    res.setHeader('Content-Disposition', `attachment; filename="${DOWNLOAD_FILENAME}"`);
+    res.setHeader('Content-Type', contentType);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    const { Readable } = require('stream');
+    Readable.fromWeb(response.body).pipe(res);
+  } catch (err) {
+    console.error('Download proxy error:', err);
+    res.status(502).json({ error: 'Download proxy failed' });
+  }
+});
+
 // Start server
 async function startServer() {
   try {
@@ -3329,7 +3558,7 @@ async function startServer() {
     const server = app.listen(PORT, () => {
       console.log('');
       console.log('┌─────────────────────────────────────────────────┐');
-      console.log('│  🚀 Interview Stealth Assist Backend Server   │');
+      console.log('│  🚀 ${APP_NAME} Backend Server   │');
       console.log('├─────────────────────────────────────────────────┤');
       console.log(`│  📡 API Server: http://localhost:${PORT}        │`);
       console.log('│  ✅ MongoDB: Connected                          │');

@@ -9,10 +9,14 @@ const SignInPage: React.FC = () => {
   const navigate = useNavigate();
   const isElectron = checkIsElectron();
 
-  const handleAuthSuccess = (user: any) => {
+  const handleAuthSuccess = (user: any, accessToken?: string, refreshToken?: string) => {
     // Save user and notify AppRouter by dispatching a custom event + navigate
     localStorage.setItem('isa_current_user', JSON.stringify(user));
-    window.dispatchEvent(new CustomEvent('user-auth-success', { detail: { user } }));
+    if (accessToken) localStorage.setItem('isa_access_token', accessToken);
+    if (refreshToken) localStorage.setItem('isa_refresh_token', refreshToken);
+    window.dispatchEvent(new CustomEvent('user-auth-success', {
+      detail: { user, accessToken, refreshToken }
+    }));
     navigate('/service');
   };
 

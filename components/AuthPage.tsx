@@ -3,7 +3,7 @@ import { authClient } from '../src/utils/authClient';
 import StealthModal from './StealthModal';
 
 interface AuthPageProps {
-  onAuthSuccess: (user: any) => void;
+  onAuthSuccess: (user: any, accessToken?: string, refreshToken?: string) => void;
 }
 
 // Declare google global type
@@ -127,9 +127,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       setError('');
       
       const result = await authClient.googleLogin(response.credential);
-      
+
       if (result.success) {
-        onAuthSuccess(result.user);
+        onAuthSuccess(result.user, result.accessToken, result.refreshToken);
       } else {
         setError(result.message || 'Google login failed');
       }
@@ -148,7 +148,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       const { ipcRenderer } = (window as any).require('electron');
       const result = await ipcRenderer.invoke('google-auth-electron');
       if (result.success) {
-        onAuthSuccess(result.user);
+        onAuthSuccess(result.user, result.accessToken, result.refreshToken);
       } else {
         setError(result.message || 'Google login failed');
       }
@@ -199,7 +199,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         const result = await authClient.login(formData.username, formData.password);
 
         if (result.success) {
-          onAuthSuccess(result.user);
+          onAuthSuccess(result.user, result.accessToken, result.refreshToken);
         } else {
           setError(result.message);
         }
@@ -270,7 +270,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               <span className="text-4xl font-black text-white">IA</span>
             </div>
             <h1 className="text-3xl font-black text-black dark:text-white uppercase tracking-wider mb-2">
-              Interview <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-500">Assist</span>
+              Meeting <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-500">Assist</span>
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
               {effectiveIsLogin ? (
@@ -400,7 +400,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-3"
+                aria-label="Toggle password visibility"
               >
                 {showPassword ? (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -477,7 +478,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-3"
                 >
                   {showConfirmPassword ? (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -532,7 +533,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                   confirmPassword: ''
                 });
               }}
-              className="text-sm text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors"
+              className="text-sm text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors py-2"
             >
               {effectiveIsLogin ? "Don't have an account? " : 'Already have an account? '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 font-bold hover:from-blue-700 hover:to-indigo-700 dark:hover:from-blue-300 dark:hover:to-indigo-300">
@@ -550,7 +551,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                   setError('');
                   setResendMessage('');
                 }}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline py-2"
               >
                 Didn't receive verification email?
               </button>
@@ -609,7 +610,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                   }
                 }}
                 disabled={resendLoading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-sm disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg text-sm disabled:opacity-50"
               >
                 {resendLoading ? 'Sending...' : 'Resend Verification Email'}
               </button>

@@ -9,7 +9,7 @@ const FeaturesPage: React.FC = () => {
         {/* Header */}
         <div className="text-center mb-12 sm:mb-16">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-black dark:text-white mb-3 sm:mb-4">Powerful Features</h1>
-          <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-400 px-4">Everything you need to ace your interviews</p>
+          <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-400 px-4">Everything you need to ace your meetings</p>
         </div>
 
         {/* Features List */}
@@ -27,13 +27,13 @@ const FeaturesPage: React.FC = () => {
           />
 
           <Feature
-            title="🤖 Multi-AI Provider Support"
-            description="Choose your preferred AI provider. Use your own API keys for maximum control."
+            title="🌐 Browser AI Features"
+            description="Access browser AI features directly from your overlay. Seamless integration with your workflow."
             features={[
-              "Google Gemini 2.5 Flash",
-              "OpenAI GPT-4o Mini",
-              "Claude 3.5 Sonnet",
-              "Groq Lightning Fast"
+              "Access browser AI features here",
+              "Real-time AI responses",
+              "Works with your browser",
+              "Stay productive and focused"
             ]}
             reverse={true}
           />
@@ -88,7 +88,7 @@ const FeaturesPage: React.FC = () => {
 
           <Feature
             title="⌨️ Keyboard Shortcuts"
-            description="Powerful keyboard shortcuts for hands-free operation during interviews."
+            description="Powerful keyboard shortcuts for hands-free operation during meetings."
             features={[
               "Start/stop listening",
               "Get instant answers",
@@ -115,7 +115,7 @@ const FeaturesPage: React.FC = () => {
         <div className="mt-20 text-center">
           <h2 className="text-3xl sm:text-4xl font-black text-black dark:text-white mb-6">Ready to get started?</h2>
           <p className="text-lg text-slate-600 dark:text-slate-400 mb-8 max-w-2xl mx-auto">
-            Start with 15 free credits. No credit card required.
+            Start with 10 free credits. No credit card required.
           </p>
           <Link
             to="/service"

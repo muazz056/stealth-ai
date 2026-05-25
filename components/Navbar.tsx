@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDarkMode } from '../src/context/DarkModeContext';
 import { APP_CONFIG } from '../src/config';
 import TokenBadge from './TokenBadge';
@@ -15,8 +15,14 @@ interface NavbarProps {
 
 const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessionButton = false, showAllLinks = false, isElectron = false }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
+
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
 
 
   const getTokenColor = () => {
@@ -43,9 +49,9 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
-            <img src="./stealth-logo.png" alt="Stealth Assist" className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" />
+            <img src="./stealth-logo.png" alt={APP_CONFIG.NAME} className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" />
             <div className="hidden sm:block">
-              <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">Stealth Assist</h1>
+              <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">{APP_CONFIG.NAME}</h1>
               <p className="text-[10px] text-slate-600 dark:text-slate-500">Stealth Engine V1.2</p>
             </div>
             <h1 className="sm:hidden text-sm font-black text-black dark:text-white uppercase italic">SA</h1>
@@ -55,7 +61,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
           <div className={isElectron ? "flex items-center gap-4 xl:gap-6" : "hidden lg:flex items-center gap-4 xl:gap-6"}>
             {!isElectron && (
               <>
-                <Link to="/" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/" className={`text-sm font-medium transition-colors ${isActive('/') && location.pathname === '/' ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   Home
                 </Link>
                 {!isElectron && APP_CONFIG.DOWNLOAD_WINDOWS && (
@@ -66,19 +72,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                     Stealth
                   </Link>
                 )}
-                <Link to="/features" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/features" className={`text-sm font-medium transition-colors ${isActive('/features') ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   Features
                 </Link>
-                <Link to="/pricing" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/pricing" className={`text-sm font-medium transition-colors ${isActive('/pricing') ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   Pricing
                 </Link>
-                <Link to="/service" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/service" className={`text-sm font-medium transition-colors ${isActive('/service') ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   Service
                 </Link>
-                <Link to="/about" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/about" className={`text-sm font-medium transition-colors ${isActive('/about') ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   About
                 </Link>
-                <Link to="/contact" className="text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white text-sm font-medium transition-colors">
+                <Link to="/contact" className={`text-sm font-medium transition-colors ${isActive('/contact') ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'}`}>
                   Contact
                 </Link>
               </>
@@ -87,7 +93,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
             {/* Dark Mode Toggle */}
             <button
               onClick={toggleDarkMode}
-              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all group"
+              className="p-2.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all group"
               aria-label="Toggle dark mode"
             >
               {isDarkMode ? (
@@ -168,7 +174,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
           {!isElectron && (
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden p-2 text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors"
+              className="lg:hidden p-3 text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {mobileMenuOpen ? (
@@ -187,7 +193,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
             <div className="flex flex-col gap-2">
               {!isElectron && (
                 <>
-                  <Link to="/" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/') && location.pathname === '/' ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     Home
                   </Link>
                   {!isElectron && APP_CONFIG.DOWNLOAD_WINDOWS && (
@@ -199,19 +205,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       Stealth
                     </Link>
                   )}
-                  <Link to="/features" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/features" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/features') ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     Features
                   </Link>
-                  <Link to="/pricing" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/pricing" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/pricing') ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     Pricing
                   </Link>
-                  <Link to="/service" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/service" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/service') ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     Service
                   </Link>
-                  <Link to="/about" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/about" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/about') ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     About
                   </Link>
-                  <Link to="/contact" onClick={() => setMobileMenuOpen(false)} className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors">
+                  <Link to="/contact" onClick={() => setMobileMenuOpen(false)} className={`px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive('/contact') ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-500/10' : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                     Contact
                   </Link>
                   
@@ -221,7 +227,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
                       toggleDarkMode();
                       setMobileMenuOpen(false);
                     }}
-                    className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                    className="px-4 py-3 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                   >
                     {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
                   </button>

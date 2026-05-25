@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
+import { APP_CONFIG } from '../src/config';
 
 // TypeScript declarations for Web Speech API
 declare global {
@@ -176,13 +177,10 @@ const TransparentOverlay: React.FC<TransparentOverlayProps> = ({ apiKey, resume,
       const gen = genAI.current;
       if (!gen) throw new Error('AI not initialized');
 
-      const prompt = `You are an AI interview assistant. Provide concise, professional answers to interview questions. 
-Keep responses under 100 words and focus on practical, actionable advice. 
-The user is currently in an interview and needs quick, helpful responses.
-
-Interview Question/Context: "${transcription.streamingText}"
-
-Please provide a brief, professional answer that would be appropriate for a job interview. Focus on:
+      const prompt = `You are an AI meeting assistant. Provide concise, professional answers to meeting questions. 
+The user is currently in a meeting and needs quick, helpful responses. 
+Meeting Question/Context: "${transcription.streamingText}" 
+Please provide a brief, professional answer. Focus on:
 - Key technical concepts if it's a technical question
 - Behavioral examples using STAR method if it's a behavioral question
 - Professional tone and confidence
@@ -241,7 +239,7 @@ Please provide a brief, professional answer that would be appropriate for a job 
         <button
           onClick={() => setIsMinimized(false)}
           className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-all duration-200"
-          title="Expand Meeting Assistant"
+          title={`Expand ${APP_CONFIG.NAME}`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
@@ -280,7 +278,7 @@ Please provide a brief, professional answer that would be appropriate for a job 
            style={{ WebkitAppRegion: 'drag' } as any}>
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${transcription.isListening ? 'bg-red-500 animate-pulse' : 'bg-gray-500'}`}></div>
-          <span className="text-sm font-semibold">Interview Assistant</span>
+          <span className="text-sm font-semibold">{APP_CONFIG.NAME}</span>
         </div>
         <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
           <button

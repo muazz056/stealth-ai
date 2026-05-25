@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Footer from '../components/Footer';
+import { APP_CONFIG } from '../src/config';
 
 const AboutPage: React.FC = () => {
   return (
@@ -8,9 +9,9 @@ const AboutPage: React.FC = () => {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-20">
         {/* Header */}
         <div className="text-center mb-12 sm:mb-16">
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-black dark:text-white mb-4">About Interview Assist</h1>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-black dark:text-white mb-4">About {APP_CONFIG.NAME}</h1>
           <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-400">
-            Empowering candidates with AI-powered interview preparation
+            AI-powered meeting assistance for professionals
           </p>
         </div>
 
@@ -19,23 +20,23 @@ const AboutPage: React.FC = () => {
           <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 mb-12">
             <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-4">Our Mission</h2>
             <p className="text-base sm:text-lg text-slate-700 dark:text-slate-300 leading-relaxed mb-4">
-              Interview Assist was created to level the playing field in technical interviews. We believe that
-              every candidate deserves access to the same preparation tools and resources, regardless of their background.
+              {APP_CONFIG.NAME} was created to help you excel in professional meetings. We believe that
+              everyone deserves access to intelligent real-time support, regardless of their role.
             </p>
             <p className="text-base sm:text-lg text-slate-700 dark:text-slate-300 leading-relaxed">
-              Our AI-powered assistant provides real-time support during live interviews, helping you showcase
-              your best self with confidence and clarity.
+              Our AI-powered assistant provides real-time support during live meetings, helping you present
+              your best ideas with confidence and clarity.
             </p>
           </div>
 
           {/* Key Features */}
           <div className="mb-12">
-            <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-6">Why Interview Assist?</h2>
+            <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-6">Why {APP_CONFIG.NAME}?</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <ValueCard
                 icon="🎯"
                 title="Focused on Results"
-                description="Get instant, relevant answers tailored to your resume and the job you're interviewing for."
+                description="Get instant, relevant answers tailored to your resume and the discussion topic."
               />
               <ValueCard
                 icon="🔒"
@@ -50,43 +51,16 @@ const AboutPage: React.FC = () => {
               <ValueCard
                 icon="🎓"
                 title="Learn & Improve"
-                description="Review your interview history to identify patterns and improve for next time."
-              />
-            </div>
-          </div>
-
-          {/* Technology Stack */}
-          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 mb-12">
-            <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-6">Technology</h2>
-            <div className="space-y-4">
-              <TechItem
-                name="Electron"
-                description="Cross-platform desktop application framework"
-              />
-              <TechItem
-                name="React + TypeScript"
-                description="Modern UI with type safety"
-              />
-              <TechItem
-                name="Google Speech API"
-                description="Real-time voice transcription"
-              />
-              <TechItem
-                name="Multi-AI Support"
-                description="Gemini, OpenAI, Claude, Groq"
-              />
-              <TechItem
-                name="MongoDB"
-                description="Cloud database for conversation history"
+                description="Review your meeting history to identify patterns and improve for next time."
               />
             </div>
           </div>
 
           {/* CTA */}
           <div className="text-center">
-            <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-4">Ready to ace your next interview?</h2>
+            <h2 className="text-2xl sm:text-3xl font-black text-black dark:text-white mb-4">Ready for your next meeting?</h2>
             <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">
-              Start with 15 free credits. No credit card required.
+              Start with 10 free credits. No credit card required.
             </p>
             <Link
               to="/service"
@@ -114,21 +88,6 @@ const ValueCard: React.FC<ValueCardProps> = ({ icon, title, description }) => (
     <div className="text-4xl mb-3">{icon}</div>
     <h3 className="text-xl font-bold text-black dark:text-white mb-2">{title}</h3>
     <p className="text-slate-600 dark:text-slate-400 text-sm">{description}</p>
-  </div>
-);
-
-interface TechItemProps {
-  name: string;
-  description: string;
-}
-
-const TechItem: React.FC<TechItemProps> = ({ name, description }) => (
-  <div className="flex items-start gap-3">
-    <span className="text-blue-500 text-xl flex-shrink-0">▪</span>
-    <div>
-      <h4 className="font-bold text-black dark:text-white">{name}</h4>
-      <p className="text-slate-600 dark:text-slate-400 text-sm">{description}</p>
-    </div>
   </div>
 );
 

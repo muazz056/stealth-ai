@@ -3,6 +3,24 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Footer from '../components/Footer';
 import { APP_CONFIG } from '../src/config';
 
+const WindowsIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-12 h-12 mx-auto" fill="currentColor">
+    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-13.051-1.801"/>
+  </svg>
+);
+
+const AppleIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-12 h-12 mx-auto" fill="currentColor">
+    <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+  </svg>
+);
+
+const LinuxIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-12 h-12 mx-auto" fill="currentColor">
+    <path d="M12 2C10.5 2 7 4 7 10c0 3.5 2 5.5 2 7.5S10 22 10 22h4s1-1.5 1-4.5 2-4 2-7.5c0-6-3.5-8-5-8zm-1 3c.6 0 1 .4 1 1s-.4 1-1 1-1-.4-1-1 .4-1 1-1zm2 0c.6 0 1 .4 1 1s-.4 1-1 1-1-.4-1-1 .4-1 1-1zm-2.5 2c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5zm3 0c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5zM12 7c1 0 1.5.5 1.5 1.5S12.5 10 12 10s-1.5-.5-1.5-1.5S11 7 12 7zm-1.5 4c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5zm3 0c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5zM12 11c1 0 1.5.5 1.5 1.5S12.5 14 12 14s-1.5-.5-1.5-1.5S11 11 12 11zm-2 3.5c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5zm4 0c.3 0 .5.2.5.5s-.2.5-.5.5-.5-.2-.5-.5.2-.5.5-.5z"/>
+  </svg>
+);
+
 const LS_USER_KEY = 'isa_current_user';
 
 const LandingPage: React.FC = () => {
@@ -59,18 +77,18 @@ const LandingPage: React.FC = () => {
 
             {/* Heading with Gradient */}
             <h1 className="text-5xl sm:text-6xl md:text-7xl font-black text-black dark:text-white mb-6 md:mb-8 uppercase tracking-tight">
-              Interview{' '}
+              Meeting{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-500 dark:to-purple-500 animate-gradient">
                 Assist
               </span>
             </h1>
             
             <p className="text-xl sm:text-2xl md:text-3xl text-slate-800 dark:text-white mb-4 md:mb-6 font-semibold px-4">
-              AI-Powered Real-Time Interview Assistant
+              AI-Powered Real-Time {APP_CONFIG.NAME}
             </p>
             
             <p className="text-base md:text-lg text-slate-700 dark:text-gray-100 mb-10 md:mb-14 max-w-3xl mx-auto px-4 leading-relaxed">
-              Get instant, intelligent answers during live interviews with our stealth overlay technology.
+               Get instant, intelligent answers during live meetings with our stealth overlay technology.
               <br className="hidden md:block" />
               <span className="text-blue-600 dark:text-blue-300 font-semibold">Invisible to screen sharing.</span> Powered by cutting-edge AI.
             </p>
@@ -82,7 +100,7 @@ const LandingPage: React.FC = () => {
                 className="group relative w-full px-8 md:px-10 py-4 md:py-5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 text-white rounded-xl text-base md:text-lg font-bold transition-all shadow-2xl shadow-blue-500/50 hover:shadow-blue-500/70 hover:scale-105 transform overflow-hidden"
               >
                 <span className="relative z-10 flex items-center justify-center gap-2">
-                  🚀 Start Interview Session
+                  🚀 Start Meeting Session
                 </span>
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
               </Link>
@@ -170,21 +188,24 @@ const LandingPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 max-w-4xl mx-auto">
             <DownloadCard
               platform="Windows"
-              icon="🪟"
+              icon={<WindowsIcon />}
+              color="from-blue-500 to-blue-700"
               version="v1.2.0"
               size="~150 MB"
               comingSoon={false}
             />
             <DownloadCard
               platform="macOS"
-              icon="🍎"
+              icon={<AppleIcon />}
+              color="from-gray-500 to-gray-700"
               version="Coming Soon"
               size="TBD"
               comingSoon={true}
             />
             <DownloadCard
               platform="Linux"
-              icon="🐧"
+              icon={<LinuxIcon />}
+              color="from-orange-500 to-yellow-600"
               version="Coming Soon"
               size="TBD"
               comingSoon={true}
@@ -219,13 +240,14 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ icon, title, description, gra
 
 interface DownloadCardProps {
   platform: string;
-  icon: string;
+  icon: React.ReactNode;
+  color: string;
   version: string;
   size: string;
   comingSoon: boolean;
 }
 
-const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, size, comingSoon }) => {
+const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, color, version, size, comingSoon }) => {
   const navigate = useNavigate();
   
   const isLoggedIn = () => {
@@ -256,31 +278,50 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ platform, icon, version, si
       navigate('/service');
       return;
     }
-    window.location.href = downloadUrl;
+    // Use backend proxy to force correct filename via Content-Disposition header
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    const proxyUrl = `${backendUrl}/api/download/windows?url=${encodeURIComponent(downloadUrl)}`;
+    const a = document.createElement('a');
+    a.href = proxyUrl;
+    a.download = APP_CONFIG.DOWNLOAD_FILENAME || 'Stealth Assist Setup.exe';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
   
   return (
-    <div className="bg-white dark:bg-slate-800/30 backdrop-blur-sm border border-slate-200 dark:border-slate-700/50 rounded-2xl p-6 md:p-8 hover:border-blue-500/50 transition-all hover:scale-105 transform">
-      <div className="text-5xl mb-4 text-center">{icon}</div>
-      <h3 className="text-2xl font-black text-black dark:text-white mb-2 text-center">{platform}</h3>
-      <p className="text-slate-700 dark:text-gray-100 text-sm mb-1 text-center">{version}</p>
-      <p className="text-slate-600 dark:text-gray-200 text-xs mb-6 text-center">{size}</p>
-      
-      {!isAvailable ? (
-        <button
-          disabled
-          className="w-full px-6 py-3 bg-slate-300 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 rounded-xl font-bold cursor-not-allowed"
-        >
-          Coming Soon
-        </button>
-      ) : (
-        <button
-          onClick={handleDownload}
-          className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl"
-        >
-          Download
-        </button>
-      )}
+    <div className="group bg-white dark:bg-slate-800/30 backdrop-blur-sm border border-slate-200 dark:border-slate-700/50 rounded-2xl p-6 md:p-8 hover:border-blue-500/50 transition-all hover:scale-105 transform relative overflow-hidden">
+      <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
+      <div className="relative z-10">
+        <div className={`w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br ${color} bg-opacity-10 text-white shadow-lg`}>
+          {icon}
+        </div>
+        <h3 className="text-2xl font-black text-black dark:text-white mb-2 text-center">{platform}</h3>
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Version</span>
+          <span className="text-slate-700 dark:text-gray-100 text-sm font-semibold">{version}</span>
+        </div>
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Size</span>
+          <span className="text-slate-600 dark:text-gray-200 text-xs">{size}</span>
+        </div>
+        
+        {!isAvailable ? (
+          <button
+            disabled
+            className="w-full px-6 py-3 bg-slate-200 dark:bg-slate-700/50 text-slate-400 dark:text-slate-500 rounded-xl font-bold cursor-not-allowed border border-slate-300 dark:border-slate-600/50"
+          >
+            Coming Soon
+          </button>
+        ) : (
+          <button
+            onClick={handleDownload}
+            className={`w-full px-6 py-3 bg-gradient-to-r ${color} hover:brightness-110 text-white rounded-xl font-bold text-center transition-all shadow-lg hover:shadow-xl`}
+          >
+            Download
+          </button>
+        )}
+      </div>
     </div>
   );
 };

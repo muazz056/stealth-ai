@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import Footer from '../components/Footer';
 
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
 const ContactPage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
@@ -9,13 +11,25 @@ const ContactPage: React.FC = () => {
     message: ''
   });
   const [submitted, setSubmitted] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In production, send to backend
-    console.log('Form submitted:', formData);
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 3000);
+    setSubmitStatus('sending');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      if (!response.ok) throw new Error('Failed to send');
+      setSubmitStatus('success');
+      setFormData({ name: '', email: '', subject: '', message: '' });
+      setTimeout(() => setSubmitStatus('idle'), 3000);
+    } catch (err) {
+      setSubmitStatus('error');
+      setTimeout(() => setSubmitStatus('idle'), 4000);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -42,25 +56,25 @@ const ContactPage: React.FC = () => {
             <ContactMethod
               icon="📧"
               title="Email"
-              value="support@interviewassist.com"
-              link="mailto:support@interviewassist.com"
+              value="muaxijaz@gmail.com"
+              link="mailto:muaxijaz@gmail.com"
             />
             <ContactMethod
-              icon="💬"
-              title="Discord"
-              value="Join our community"
+              icon="📸"
+              title="Instagram"
+              value="@stealthassist"
               link="#"
             />
             <ContactMethod
-              icon="🐙"
-              title="GitHub"
-              value="View source code"
+              icon="📘"
+              title="Facebook"
+              value="Stealth Assist"
               link="#"
             />
             <ContactMethod
               icon="🐦"
               title="Twitter"
-              value="@InterviewAssist"
+              value="@stealthassist"
               link="#"
             />
           </div>
@@ -139,14 +153,20 @@ const ContactPage: React.FC = () => {
 
               <button
                 type="submit"
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-bold transition-all shadow-lg hover:shadow-xl transform hover:scale-105"
+                disabled={submitStatus === 'sending'}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-bold transition-all shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Send Message
+                {submitStatus === 'sending' ? 'Sending...' : 'Send Message'}
               </button>
 
-              {submitted && (
+              {submitStatus === 'success' && (
                 <div className="bg-green-500/10 border border-green-500/50 rounded-lg p-4 text-center">
                   <p className="text-green-600 dark:text-green-400 font-bold">✓ Message sent successfully!</p>
+                </div>
+              )}
+              {submitStatus === 'error' && (
+                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 text-center">
+                  <p className="text-red-600 dark:text-red-400 font-bold">✗ Failed to send. Please try again or email directly.</p>
                 </div>
               )}
             </form>
@@ -161,7 +181,7 @@ const ContactPage: React.FC = () => {
           <div className="space-y-4">
             <FAQItem
               question="What is the response time for support?"
-              answer="We typically respond within 24-48 hours. For urgent issues, please use the Discord channel for faster support."
+              answer="We typically respond within 24-48 hours. For urgent issues, please email us directly."
             />
             <FAQItem
               question="Can I request a refund?"
@@ -169,7 +189,7 @@ const ContactPage: React.FC = () => {
             />
             <FAQItem
               question="How do I report a bug?"
-              answer="Use the contact form above or open an issue on our GitHub repository."
+              answer="Use the contact form above or email us directly with details about the issue."
             />
           </div>
         </div>

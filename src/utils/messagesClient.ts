@@ -1,10 +1,11 @@
 /**
  * Messages Client
  * Handles conversation history storage in MongoDB
- * Supports both Electron IPC and HTTP REST API
+ * Supports both Electron IPC and HTTP REST API with JWT auth
  */
 
 import { API_CONFIG } from '../config';
+import { apiClient } from './apiClient';
 
 const API_BASE_URL = API_CONFIG.API_URL;
 
@@ -24,9 +25,8 @@ export const messagesClient = {
       const { ipcRenderer } = (window as any).require('electron');
       return await ipcRenderer.invoke('messages-save', { userId, message });
     } else {
-      const response = await fetch(`${API_BASE_URL}/messages/save`, {
+      const response = await apiClient('/messages/save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, message })
       });
       if (!response.ok) throw new Error('Failed to save message');
@@ -42,9 +42,8 @@ export const messagesClient = {
       const { ipcRenderer } = (window as any).require('electron');
       return await ipcRenderer.invoke('messages-save-history', { userId, history });
     } else {
-      const response = await fetch(`${API_BASE_URL}/messages/save-history`, {
+      const response = await apiClient('/messages/save-history', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, history })
       });
       if (!response.ok) throw new Error('Failed to save history');
@@ -60,7 +59,7 @@ export const messagesClient = {
       const { ipcRenderer } = (window as any).require('electron');
       return await ipcRenderer.invoke('messages-get-history', { userId });
     } else {
-      const response = await fetch(`${API_BASE_URL}/messages/history/${userId}`);
+      const response = await apiClient(`/messages/history/${userId}`);
       if (!response.ok) throw new Error('Failed to get history');
       return await response.json();
     }
@@ -74,7 +73,7 @@ export const messagesClient = {
       const { ipcRenderer } = (window as any).require('electron');
       return await ipcRenderer.invoke('messages-clear', { userId });
     } else {
-      const response = await fetch(`${API_BASE_URL}/messages/clear/${userId}`, {
+      const response = await apiClient(`/messages/clear/${userId}`, {
         method: 'DELETE'
       });
       if (!response.ok) throw new Error('Failed to clear history');
@@ -82,4 +81,3 @@ export const messagesClient = {
     }
   }
 };
-
