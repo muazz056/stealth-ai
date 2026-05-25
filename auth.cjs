@@ -367,7 +367,7 @@ async function connectWithRetry(attempt = 1) {
       return connectWithRetry(attempt + 1);
     }
     
-    throw new Error(`MongoDB connection failed after ${MAX_RETRY_ATTEMPTS} attempts: ${error.message}`);
+    throw new Error(`MongoDB connection failed after ${MAX_RETRY_ATTEMPTS} attempts: ${error.message}`, { cause: error });
   }
 }
 

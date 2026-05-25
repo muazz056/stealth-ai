@@ -447,9 +447,10 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action === 'startStopListen' ? 'toggleListen' : action;
         merged[mappedAction] = {
           ...(defaults[mappedAction] || {}),
+          action: mappedAction as any,
           modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
           defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
-        };
+        } as ShortcutConfig;
       }
       setShortcuts(merged);
     } else {
@@ -558,7 +559,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     };
 
     refreshUser();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Manually save edited summaries (user-provided)
@@ -897,13 +897,9 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     };
   }, [isGenerating, isListening, shortcuts]); // Re-run when isGenerating or isListening changes
 
-  // Handle user-defined shortcuts
+  // Handle user-defined shortcuts (including when textarea focused)
   useEffect(() => {
     const handleShortcutKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      
       const pressedKey = e.key.toLowerCase();
       const hasCtrl = e.ctrlKey || e.metaKey;
       const hasShift = e.shiftKey;
@@ -955,10 +951,11 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
               setCommittedText('');
               setInterimText('');
               break;
-            case 'focusInput':
+            case 'focusInput': {
               const input = document.querySelector('textarea[placeholder*="question"]') as HTMLTextAreaElement;
               if (input) input.focus();
               break;
+            }
             case 'stopOrClear':
               if (isGeneratingRef.current) {
                 if (answerAbortRef.current) {
@@ -2499,7 +2496,7 @@ Respond in ${langDisplay}.]`;
                     body: JSON.stringify({ userId: user._id, deepgramLanguage: val })
                   });
                   if (langRes.ok) {
-                    let updatedUser = { ...user, deepgramLanguage: val };
+                    const updatedUser = { ...user, deepgramLanguage: val };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     // Notify overlay immediately
                     if (typeof window !== 'undefined' && (window as any).require) {
@@ -2543,7 +2540,7 @@ Respond in ${langDisplay}.]`;
                     body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: val } })
                   });
                   if (res.ok) {
-                    let updatedUser = { ...user, settings: { ...user.settings, responseLanguage: val } };
+                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: val } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', val);
                     if (typeof window !== 'undefined' && (window as any).require) {
@@ -2591,7 +2588,7 @@ Respond in ${langDisplay}.]`;
                   });
                   const langResult = await langRes.json();
                   if (langRes.ok) {
-                    let updatedUser = { ...user, deepgramLanguage };
+                    const updatedUser = { ...user, deepgramLanguage };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                   }
 
@@ -2602,7 +2599,7 @@ Respond in ${langDisplay}.]`;
                   });
                   const settingsResult = await settingsRes.json();
                   if (settingsResult.success) {
-                    let updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
+                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', settings.responseLanguage);
                   }
@@ -2614,7 +2611,7 @@ Respond in ${langDisplay}.]`;
                   });
                   const keyResult = await keyRes.json();
                   if (keyRes.ok) {
-                    let updatedUser = { ...user, deepgramKeyterms };
+                    const updatedUser = { ...user, deepgramKeyterms };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                   }
 
@@ -3036,7 +3033,7 @@ Respond in ${langDisplay}.]`;
             </div>
             
 {/* Search Bar + Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col sm:flex-row gap-3 items-start">
                 <textarea
                   ref={questionInputRef}
                   value={isListening ? transcribedText : manualTextInput}
@@ -3046,8 +3043,6 @@ Respond in ${langDisplay}.]`;
                     } else {
                       setManualTextInput(e.target.value);
                     }
-                    e.target.style.height = 'auto';
-                    e.target.style.height = e.target.scrollHeight + 'px';
                   }}
                   placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
                   onKeyDown={(e) => {
@@ -3057,7 +3052,6 @@ Respond in ${langDisplay}.]`;
                       setTranscribedText('');
                       setCommittedText('');
                       setInterimText('');
-                      e.currentTarget.style.height = 'auto';
                     }
                     else if (e.key === 'Enter' && !e.shiftKey && !isListening) {
                       e.preventDefault();

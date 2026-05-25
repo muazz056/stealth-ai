@@ -94,7 +94,6 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       description: 'Focus on the question input field',
       defaultKey: '',
       modifier: 'Alt',
-      key: ''
     },
     stopOrClear: {
       action: 'stopOrClear',
@@ -116,7 +115,6 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       description: 'Enable or disable live transcription',
       defaultKey: 'T',
       modifier: primaryMod,
-      key: 'T'
     },
     stopGeneration: {
       action: 'stopGeneration',
@@ -124,7 +122,6 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       description: 'Stop the current AI generation',
       defaultKey: 'Escape',
       modifier: 'Alt',
-      key: 'Escape'
     }
   };
 };

@@ -327,9 +327,10 @@ const OverlayApp: React.FC = () => {
               const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action === 'startStopListen' ? 'toggleListen' : action;
               merged[mappedAction] = {
                 ...(defaults[mappedAction] || {}),
+                action: mappedAction as any,
                 modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
                 defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
-              };
+              } as ShortcutConfig;
             }
           }
           ipcRenderer.invoke('update-global-shortcuts', merged);
@@ -583,7 +584,7 @@ const OverlayApp: React.FC = () => {
       /^\(.*static.*\)$/i,           // (static)
       /^\[.*music.*\]$/i,            // [music]
       /^\[.*sound.*\]$/i,            // [sound]
-      /^[\(\[].*[\)\]]$/,            // Anything in parentheses/brackets only
+      /^[([]/i,                       // Starts with ( or [
     ];
     
     // Check against patterns
@@ -1314,9 +1315,10 @@ const OverlayApp: React.FC = () => {
             const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action;
             merged[mappedAction] = {
               ...(defaults[mappedAction] || {}),
+              action: mappedAction as any,
               modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
               defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
-            };
+            } as ShortcutConfig;
           }
         }
         setShortcuts(merged);
@@ -1332,10 +1334,6 @@ const OverlayApp: React.FC = () => {
   // Configurable shortcut keydown handler
   useEffect(() => {
     const handleShortcutKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
       const pressedKey = e.key.toLowerCase();
       const hasCtrl = e.ctrlKey || e.metaKey;
       const hasShift = e.shiftKey;
@@ -2917,8 +2915,8 @@ ${companyInfoSummary}`;
           const _uStr = localStorage.getItem(LS_USER_KEY);
           console.log('🔍 [BrowseAI/Button] localStorage userStr:', _uStr);
           let _isFree = true;
-          let _debugPlan = 'unknown';
-          let _debugRole = 'unknown';
+          let _debugPlan;
+          let _debugRole;
           if (_uStr) {
             try {
               const _u = JSON.parse(_uStr);
@@ -3054,8 +3052,6 @@ ${companyInfoSummary}`;
                 } else {
                   setManualTextInput(e.target.value);
                 }
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
               }}
               placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
             onKeyDown={(e) => {

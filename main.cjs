@@ -132,7 +132,7 @@ function isPortInUse(port) {
 // Start backend server. Returns a Promise that resolves when the backend
 // is actually listening (or fails to start after a timeout).
 function startBackendServer() {
-    return new Promise(async (resolve) => {
+    return new Promise((resolve) => {
         if (backendProcess) {
             console.log('⚠️ Backend server already running');
             resolve(true);
@@ -142,109 +142,116 @@ function startBackendServer() {
         console.log('🚀 Starting backend server...');
         
         // Check if port 3001 is already in use (e.g., from npm run backend)
-        const portInUse = await isPortInUse(3001);
-        if (portInUse) {
-            console.log('✅ Backend already running on port 3001 (external). Skipping spawn.');
-            backendReady = true;
-            resolve(true);
-            return;
+        isPortInUse(3001).then((portInUse) => {
+            if (portInUse) {
+                console.log('✅ Backend already running on port 3001 (external). Skipping spawn.');
+                backendReady = true;
+                resolve(true);
+                return;
+            }
+            
+            startBackendWithSpawn(resolve);
+        }).catch(() => {
+            console.warn('⚠️ Could not check port, will attempt to start backend');
+            startBackendWithSpawn(resolve);
+        });
+    });
+}
+
+function startBackendWithSpawn(resolve) {
+    try {
+        let backendPath;
+        if (app.isPackaged) {
+            const candidates = [
+                path.join(__dirname, 'backend', 'server.cjs'),
+                path.join(process.resourcesPath, 'app', 'backend', 'server.cjs'),
+                path.join(process.resourcesPath, 'backend', 'server.cjs'),
+            ];
+            backendPath = candidates.find(p => fs.existsSync(p));
+            if (!backendPath) {
+                console.error('❌ Backend server file not found. Checked:');
+                candidates.forEach(p => console.error('   -', p, fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
+                resolve(false);
+                return;
+            }
+        } else {
+            backendPath = path.join(__dirname, 'backend', 'server.cjs');
         }
         
-        try {
-            let backendPath;
-            if (app.isPackaged) {
-                const candidates = [
-                    path.join(__dirname, 'backend', 'server.cjs'),
-                    path.join(process.resourcesPath, 'app', 'backend', 'server.cjs'),
-                    path.join(process.resourcesPath, 'backend', 'server.cjs'),
-                ];
-                backendPath = candidates.find(p => fs.existsSync(p));
-                if (!backendPath) {
-                    console.error('❌ Backend server file not found. Checked:');
-                    candidates.forEach(p => console.error('   -', p, fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
-                    resolve(false);
-                    return;
-                }
-            } else {
-                backendPath = path.join(__dirname, 'backend', 'server.cjs');
-            }
+        console.log('📂 Backend path:', backendPath);
+        
+        // Set up environment for packaged app
+        const env = { ...process.env };
+        
+        if (app.isPackaged) {
+            const appPath = path.dirname(app.getAppPath());
+            const nodeModulesPath = path.join(appPath, 'node_modules');
+            const resourcesPath = process.resourcesPath;
             
-            console.log('📂 Backend path:', backendPath);
+            console.log('📦 App path:', app.getAppPath());
+            console.log('📦 Resources path:', resourcesPath);
+            console.log('📦 Node modules path:', nodeModulesPath);
             
-            // Set up environment for packaged app
-            const env = { ...process.env };
-            
-            if (app.isPackaged) {
-                const appPath = path.dirname(app.getAppPath());
-                const nodeModulesPath = path.join(appPath, 'node_modules');
-                const resourcesPath = process.resourcesPath;
-                
-                console.log('📦 App path:', app.getAppPath());
-                console.log('📦 Resources path:', resourcesPath);
-                console.log('📦 Node modules path:', nodeModulesPath);
-                
-                env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
-                env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
-            }
-            
-            // Spawn Node.js process for backend
-            backendProcess = spawn('node', [backendPath], {
-                stdio: ['ignore', 'pipe', 'pipe'],
-                cwd: app.isPackaged ? process.resourcesPath : __dirname,
-                env: env
-            });
-            
-            // Set a timeout for backend readiness
-            const readyTimeout = setTimeout(() => {
-                if (!backendReady) {
-                    console.warn('⚠️ Backend server not ready after timeout, continuing anyway');
-                    resolve(false);
-                }
-            }, 15000);
-            
-            // Handle backend stdout
-            backendProcess.stdout.on('data', (data) => {
-                const output = data.toString();
-                console.log('🔵 Backend:', output.trim());
-                
-                if (output.includes('listening') || output.includes('started') || output.includes('3001')) {
-                    backendReady = true;
-                    clearTimeout(readyTimeout);
-                    console.log('✅ Backend server ready!');
-                    resolve(true);
-                }
-            });
-            
-            // Handle backend stderr
-            backendProcess.stderr.on('data', (data) => {
-                console.error('🔴 Backend error:', data.toString().trim());
-            });
-            
-            // Handle backend exit
-            backendProcess.on('close', (code) => {
-                clearTimeout(readyTimeout);
-                console.log(`🔵 Backend server exited with code ${code}`);
-                backendProcess = null;
-                backendReady = false;
+            env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
+            env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
+        }
+        
+        // Spawn Node.js process for backend
+        backendProcess = spawn('node', [backendPath], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            cwd: app.isPackaged ? process.resourcesPath : __dirname,
+            env: env
+        });
+        
+        // Set a timeout for backend readiness
+        const readyTimeout = setTimeout(() => {
+            if (!backendReady) {
+                console.warn('⚠️ Backend server not ready after timeout, continuing anyway');
                 resolve(false);
-            });
+            }
+        }, 15000);
+        
+        // Handle backend stdout
+        backendProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log('🔵 Backend:', output.trim());
             
-            // Handle spawn errors
-            backendProcess.on('error', (error) => {
+            if (output.includes('listening') || output.includes('started') || output.includes('3001')) {
+                backendReady = true;
                 clearTimeout(readyTimeout);
-                console.error('❌ Failed to start backend server:', error.message);
-                backendProcess = null;
-                backendReady = false;
-                resolve(false);
-            });
-            
-        } catch (error) {
-            console.error('❌ Error starting backend server:', error.message);
+                console.log('✅ Backend server ready!');
+                resolve(true);
+            }
+        });
+        
+        // Handle backend stderr
+        backendProcess.stderr.on('data', (data) => {
+            console.error('🔴 Backend error:', data.toString().trim());
+        });
+        
+        // Handle backend exit
+        backendProcess.on('close', (code) => {
+            clearTimeout(readyTimeout);
+            console.log(`🔵 Backend server exited with code ${code}`);
             backendProcess = null;
             backendReady = false;
             resolve(false);
-        }
-    });
+        });
+        
+        // Handle spawn errors
+        backendProcess.on('error', (error) => {
+            clearTimeout(readyTimeout);
+            console.error('❌ Failed to start backend server:', error.message);
+            backendProcess = null;
+            backendReady = false;
+            resolve(false);
+        });
+    } catch (error) {
+        console.error('❌ Error starting backend server:', error.message);
+        backendProcess = null;
+        backendReady = false;
+        resolve(false);
+    }
 }
 
 // Stop backend server

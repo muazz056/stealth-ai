@@ -15,7 +15,7 @@ export function createStealthWindow(options: StealthWindowOptions) {
   // This file is intended to be used from the Electron main script.
   // If `require('electron')` fails, we simply return a mock object.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { BrowserWindow } = require('electron') as typeof import('electron');
     const win = new BrowserWindow({
       width: options.width ?? 800,
