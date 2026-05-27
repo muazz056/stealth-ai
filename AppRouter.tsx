@@ -125,6 +125,16 @@ const AppRouterContent: React.FC = () => {
             }
           }
         }
+        // If refresh failed but tokens still exist (network error), try saved user as fallback
+        if (!refreshed && getRefreshToken()) {
+          const savedUser = localStorage.getItem(LS_USER_KEY);
+          if (savedUser) {
+            try {
+              const user = JSON.parse(savedUser);
+              saveUser(user);
+            } catch (e) {}
+          }
+        }
       } else {
         // No refresh token - check if we have a saved user (legacy)
         const savedUser = localStorage.getItem(LS_USER_KEY);

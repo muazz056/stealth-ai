@@ -1312,7 +1312,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
 
         recognition.onstart = () => {
           setIsListening(true);
-          errorHandled = false; // Reset error flag on successful start
         };
 
         recognition.onresult = (event: any) => {
@@ -1350,32 +1349,16 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         };
 
         recognition.onend = () => {
-          if (errorHandled) return; // Don't restart if there was an error that stopped listening
-          if (wantToListenRef.current) {
-            setTimeout(() => {
-              if (wantToListenRef.current && recognitionRef.current) {
-                try {
-                  recognitionRef.current.start();
-                } catch(e) {
-                  console.error('Failed to restart:', e);
-                }
-              }
-            }, 100);
-          } else {
-            setIsListening(false);
-          }
+          setIsListening(false);
         };
 
-        let errorHandled = false;
         const handleError = (e: any) => {
           console.error('Speech error:', e.error);
           if (e.error === 'not-allowed') {
-            errorHandled = true;
             setModalInfo({ title: 'Microphone Error', message: 'Microphone permission denied. Please allow microphone access in your browser settings.', variant: 'error', icon: '🎤' });
             setIsListening(false);
             wantToListenRef.current = false;
           }
-          // For 'no-speech' and other errors, don't stop - continue listening
         };
         recognition.onerror = handleError;
 
@@ -1788,7 +1771,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       
     } else if (!isElectronRef.current && deepgramWsRef.current) {
       // Browser: Stop Deepgram WebSocket
-      const currentText = transcribedText.trim();
+      const currentText = transcribedTextRef.current.trim();
       setIsListening(false);
       
       // Stop MediaRecorder first to prevent any more audio chunks
@@ -1832,13 +1815,19 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       
     } else if (recognitionRef.current) {
       // Browser: Stop Web Speech API and transfer text
-      const currentText = transcribedText;
+      const currentText = transcribedTextRef.current.trim();
       setIsListening(false);
-      setManualTextInput(currentText);
+
+      if (currentText.length > 0) {
+        setManualTextInput(prev => (prev + ' ' + currentText).trim());
+      } else {
+        console.log('⚠️ No speech detected, keeping existing text');
+      }
+
       setTranscribedText('');
       setCommittedText('');
       setInterimText('');
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.abort(); } catch (e) { try { recognitionRef.current.stop(); } catch (e2) {} }
     }
   };
   
@@ -3032,56 +3021,76 @@ Respond in ${langDisplay}.]`;
                 </div>
             </div>
             
-{/* Search Bar + Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 items-start">
-                <textarea
-                  ref={questionInputRef}
-                  value={isListening ? transcribedText : manualTextInput}
-                  onChange={(e) => {
-                    if (isListening) {
-                      setTranscribedText(e.target.value);
-                    } else {
-                      setManualTextInput(e.target.value);
-                    }
-                  }}
-                  placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Backspace') {
-                      e.preventDefault();
-                      setManualTextInput('');
-                      setTranscribedText('');
-                      setCommittedText('');
-                      setInterimText('');
-                    }
-                    else if (e.key === 'Enter' && !e.shiftKey && !isListening) {
-                      e.preventDefault();
-                      if (!isGenerating && manualTextInput.trim()) {
-                        e.currentTarget.blur();
-                        handleGetAnswer();
+{/* Search Bar + Buttons (Overlay-style layout) */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="w-full relative">
+                  <textarea
+                    ref={questionInputRef}
+                    value={isListening ? transcribedText : manualTextInput}
+                    onChange={(e) => {
+                      if (isListening) {
+                        setTranscribedText(e.target.value);
+                      } else {
+                        setManualTextInput(e.target.value);
                       }
-                    }
-                  }}
-                  rows={1}
-                  className={`flex-1 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-y-auto min-h-[48px] max-h-[30vh] placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-all [&::-webkit-scrollbar]:hidden [scrollbar-width:none] ${
-                    isListening ? 'ring-2 ring-red-500/30' : ''
-                  }`}
-                  style={{ lineHeight: '1.5' }}
-                />
+                    }}
+                    placeholder={isListening ? 'Listening... (you can edit)' : 'Type a question (optional)'}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'Backspace') {
+                        e.preventDefault();
+                        setManualTextInput('');
+                        setTranscribedText('');
+                        setCommittedText('');
+                        setInterimText('');
+                      }
+                      else if (e.key === 'Enter' && !e.shiftKey && !isListening) {
+                        e.preventDefault();
+                        if (!isGenerating && manualTextInput.trim()) {
+                          e.currentTarget.blur();
+                          handleGetAnswer();
+                        }
+                      }
+                    }}
+                    rows={1}
+                    className={`w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none overflow-y-auto min-h-[40px] max-h-[40vh] placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-all [&::-webkit-scrollbar]:hidden [scrollbar-width:none] ${
+                      isListening ? 'ring-2 ring-red-500/30' : ''
+                    }`}
+                    style={{ lineHeight: '1.5' }}
+                  />
+                </div>
 
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-col sm:flex-col gap-2">
                   <button 
                     onClick={isListening ? handleStopListen : handleStartListen}
                     disabled={isGenerating}
-                    className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all duration-200 shadow-sm ${
+                    className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all duration-200 backdrop-blur-sm border shadow-lg ${
                       isListening
-                        ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-500/20'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20'
+                        ? 'bg-red-600 hover:bg-red-700 text-white border-red-400/50 shadow-red-500/50'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white border-green-400/50 shadow-green-500/50'
                     } ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
                   >
                     <span>{isListening ? 'Stop' : 'Listen'}</span>
                     {shortcuts?.toggleListen && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.toggleListen)}</span>}
                   </button>
                   
+                  <button 
+                    onClick={() => {
+                      if (document.activeElement instanceof HTMLElement) {
+                        document.activeElement.blur();
+                      }
+                      handleGetAnswer();
+                    }}
+                    disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all duration-200 backdrop-blur-sm border shadow-lg bg-blue-600 hover:bg-blue-700 text-white border-blue-400/50 shadow-blue-500/50 ${
+                      isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
+                        ? 'opacity-50 cursor-not-allowed'
+                        : ''
+                    }`}
+                  >
+                    <span>{isGenerating ? 'Generating...' : 'Get Answer'}</span>
+                    {!isGenerating && shortcuts?.getAnswer && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.getAnswer)}</span>}
+                  </button>
+
                   {/* Transcription time remaining indicator */}
                   {(() => {
                     try {
@@ -3094,34 +3103,15 @@ Respond in ${langDisplay}.]`;
                     const usedMins = 25 - mins;
                     const pct = (usedMins / 25) * 100;
                     return (
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 justify-center">
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 whitespace-nowrap">
                         <span>🎤</span>
-                        <div className="w-14 h-1.5 bg-slate-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div className="w-14 h-1.5 bg-slate-200 dark:bg-gray-700 rounded-full overflow-hidden shrink-0">
                           <div className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full" style={{ width: `${Math.max(0, 100 - pct)}%` }} />
                         </div>
-                        <span className="font-mono">{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}</span>
-                        <span className="text-slate-400 dark:text-slate-500">/ 25:00</span>
+                        <span className="font-mono text-slate-400">{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')} / 25:00</span>
                       </div>
                     );
                   })()}
-                
-                  <button 
-                    onClick={() => {
-                      if (document.activeElement instanceof HTMLElement) {
-                        document.activeElement.blur();
-                      }
-                      handleGetAnswer();
-                    }}
-                    disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-                    className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all duration-200 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white shadow-md hover:shadow-lg ${
-                      isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
-                        ? 'opacity-50 cursor-not-allowed'
-                        : ''
-                    }`}
-                  >
-                    <span>{isGenerating ? 'Generating...' : 'Get Answer'}</span>
-                    {!isGenerating && shortcuts?.getAnswer && <span className="ml-1.5 text-[10px] opacity-70">{formatShortcut(shortcuts.getAnswer)}</span>}
-                  </button>
                 </div>
               </div>
                 </div>

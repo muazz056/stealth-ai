@@ -101,8 +101,7 @@ export async function refreshAccessToken(): Promise<boolean> {
     }
     return false;
   } catch {
-    clearTokens();
-    onTokenExpiredCallback?.();
+    // Network error — don't clear tokens, backend might be waking up
     return false;
   }
 }

@@ -230,7 +230,7 @@ async function sendVerificationEmail(email, token, username) {
 }
 
 const app = express();
-app.enable('trust proxy');
+app.set('trust proxy', 1); // trust first proxy hop (Railway LB), reject spoofed IPs
 const helmet = require('helmet');
 app.use(helmet({
   contentSecurityPolicy: false, // Disabled for API; enable if serving HTML
@@ -3287,7 +3287,8 @@ function setupDeepgramProxy(server) {
       const deepgramUrl =
         'wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language +
         '&interim_results=true&vad_events=true' +
-        '&smart_format=true&punctuate=true&endpointing=100&utterance_end_ms=1000';
+        '&smart_format=true&punctuate=true&endpointing=100&utterance_end_ms=1000' +
+        '&encoding=opus&container=webm';
 
       console.log('🎧 Deepgram proxy opening connection to:', deepgramUrl);
       console.log('🎧 Deepgram proxy sending Authorization header for API key length', apiKey.length);

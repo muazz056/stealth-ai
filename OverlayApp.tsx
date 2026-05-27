@@ -2901,7 +2901,7 @@ ${companyInfoSummary}`;
       <div className="relative z-10 flex flex-col h-full mt-12" style={{ WebkitAppRegion: 'no-drag' } as any}>
       
       {/* Enhanced Header with Glassmorphism */}
-      <div className="flex items-center gap-3 mb-3 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 backdrop-blur-xl px-4 py-3 rounded-xl border border-blue-400/30 shadow-[0_4px_16px_0_rgba(59,130,246,0.3)]">
+      <div className="flex items-center gap-2 mb-2 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 backdrop-blur-xl px-3 py-2 rounded-xl border border-blue-400/30 shadow-[0_4px_16px_0_rgba(59,130,246,0.3)]">
         {/* Status Indicator with Glow */}
         <div className="relative flex items-center gap-2">
           <div className={`w-3 h-3 rounded-full shadow-lg ${isListening ? 'bg-red-500 animate-pulse shadow-red-500/70' : 'bg-emerald-400 shadow-emerald-500/70'}`}></div>
@@ -2937,20 +2937,20 @@ ${companyInfoSummary}`;
               onClick={_isFree ? undefined : handleToggleBrowseAI}
               disabled={_isFree}
               title={_isFree ? 'BrowseAI is a paid feature. Upgrade to Pro to unlock.' : ''}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all backdrop-blur-sm ${
-                _isFree
-                  ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
-                  : browserMode && browseAIEnabled
-                    ? 'bg-green-500/40 hover:bg-green-500/60 text-white animate-pulse shadow-lg shadow-green-500/50 border border-green-400/50'
-                    : 'bg-gray-700/20 hover:bg-gray-600/30 text-white border border-gray-500/30'
-              }`}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all backdrop-blur-sm ${
+  _isFree
+    ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
+    : browserMode && browseAIEnabled
+      ? 'bg-green-500/40 hover:bg-green-500/60 text-white animate-pulse shadow-lg shadow-green-500/50 border border-green-400/50'
+      : 'bg-gray-700/20 hover:bg-gray-600/30 text-white border border-gray-500/30'
+}`}
             >
               {_isFree ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
               ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                 </svg>
               )}
@@ -2961,7 +2961,7 @@ ${companyInfoSummary}`;
         })()}
         
         {/* Action Buttons */}
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
           {/* Language Button (always visible) */}
           <button
             onClick={async () => {
@@ -2969,9 +2969,9 @@ ${companyInfoSummary}`;
               setLanguageModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
             </svg>
             Language
@@ -2984,9 +2984,9 @@ ${companyInfoSummary}`;
               setKeywordsModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
             Keywords
@@ -2997,7 +2997,7 @@ ${companyInfoSummary}`;
           <button
             onClick={handleAnalyzeScreen}
             disabled={isAnalyzing || isGenerating}
-            className={`group flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all shadow-md ${
+            className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md ${
               isAnalyzing 
                 ? 'bg-purple-600/70 text-white animate-pulse' 
                 : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
@@ -3005,12 +3005,12 @@ ${companyInfoSummary}`;
             data-action="analyze-screen"
           >
             {isAnalyzing ? (
-              <svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
             ) : (
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
@@ -3021,7 +3021,7 @@ ${companyInfoSummary}`;
           <button
             onClick={handleStopResponse}
             disabled={!isGenerating && !isAnalyzing}
-            className={`px-4 py-2 rounded-lg text-[11px] font-bold uppercase transition-all border ${
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase transition-all border ${
               isGenerating || isAnalyzing 
                 ? 'bg-amber-500/20 text-white hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
                 : 'bg-gray-800/50 text-white border-gray-700/30 cursor-not-allowed'
@@ -3032,7 +3032,7 @@ ${companyInfoSummary}`;
           
           <button 
             onClick={handleClear} 
-            className="px-4 py-2 rounded-lg text-[11px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
           >
             Clear
           </button>
@@ -3040,8 +3040,8 @@ ${companyInfoSummary}`;
       </div>
 
       {/* Transcription Box with Button */}
-      <div className="bg-gray-800 rounded-lg p-3 mb-3">
-        <div className="flex flex-col sm:flex-row gap-2">
+      <div className="bg-gray-800 rounded-lg p-2 mb-3">
+        <div className="flex flex-col sm:flex-row gap-1.5">
           <div className="w-full relative">
             <textarea
               ref={inputFieldRef}
@@ -3079,18 +3079,18 @@ ${companyInfoSummary}`;
           />
           </div>
 
-          <div className="flex flex-col sm:flex-col gap-2">
+          <div className="flex flex-col sm:flex-col gap-1.5">
             <button
               onClick={isListening ? handleStopListen : handleStartListen}
               disabled={isGenerating}
-              className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg ${
                 isListening
                   ? 'bg-red-500/40 hover:bg-red-500/60 text-white border-red-400/50 shadow-red-500/50'
                   : 'bg-green-500/40 hover:bg-green-500/60 text-white border-green-400/50 shadow-green-500/50'
               } ${isGenerating ? 'opacity-50' : ''}`}
               data-action="start-listen"
             >
-              {isListening ? 'Stop' : 'Start Listen'}
+              {isListening ? 'Stop' : 'Start'}
             </button>
 
             <button
@@ -3101,7 +3101,7 @@ ${companyInfoSummary}`;
                 handleGetAnswer();
               }}
               disabled={isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())}
-              className={`px-5 py-3 rounded-lg text-sm font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all backdrop-blur-sm border shadow-lg bg-blue-500/40 hover:bg-blue-500/60 text-white border-blue-400/50 shadow-blue-500/50 ${
                 isGenerating || !(isListening ? transcribedText.trim() : manualTextInput.trim())
                   ? 'opacity-50'
                   : ''

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { authClient } from '../src/utils/authClient';
+import { API_CONFIG } from '../src/config';
 import StealthModal from './StealthModal';
 
 interface AuthPageProps {
@@ -146,7 +147,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       setLoading(true);
       setError('');
       const { ipcRenderer } = (window as any).require('electron');
-      const result = await ipcRenderer.invoke('google-auth-electron');
+      const result = await ipcRenderer.invoke('google-auth-electron', API_CONFIG.BASE_URL);
       if (result.success) {
         onAuthSuccess(result.user, result.accessToken, result.refreshToken);
       } else {

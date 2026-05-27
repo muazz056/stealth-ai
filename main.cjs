@@ -1,4 +1,3 @@
-require('dotenv').config();
 const { app, BrowserWindow, BrowserView, globalShortcut, screen, ipcMain, desktopCapturer, clipboard, powerMonitor, dialog, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -26,10 +25,9 @@ app.on('second-instance', () => {
     }
 });
 
-// Backend URL: read from .env. Check VITE_BACKEND_URL first, then API_BACKEND_URL.
-// In dev (unpackaged) use localhost fallback. In packaged use whatever env var is set.
-// Set API_BACKEND_URL in .env before running `npm run dist` for production builds.
-const BACKEND_URL = process.env.VITE_BACKEND_URL || process.env.API_BACKEND_URL || (app.isPackaged ? 'http://localhost:3001' : 'http://localhost:3001');
+// Backend URL: Check VITE_BACKEND_URL (build-time/Vercel), then API_BACKEND_URL.
+// In dev (unpackaged) use localhost. In packaged use Railway (app has no bundled backend).
+const BACKEND_URL = process.env.VITE_BACKEND_URL || process.env.API_BACKEND_URL || (app.isPackaged ? 'https://stealth-ai-production-8ca7.up.railway.app' : 'http://localhost:3001');
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
@@ -106,163 +104,7 @@ let deepgramApiKey = '';
 let deepgramLanguage = 'multi'; // Default language
 
 // Backend Server Process
-let backendProcess = null;
-let backendReady = false;
-
-// Check if a port is already in use
-function isPortInUse(port) {
-    return new Promise((resolve) => {
-        const net = require('net');
-        const server = net.createServer();
-        server.once('error', (err) => {
-            if (err.code === 'EADDRINUSE') {
-                resolve(true); // Port is in use
-            } else {
-                resolve(false);
-            }
-        });
-        server.once('listening', () => {
-            server.close();
-            resolve(false); // Port is free
-        });
-        server.listen(port);
-    });
-}
-
-// Start backend server. Returns a Promise that resolves when the backend
-// is actually listening (or fails to start after a timeout).
-function startBackendServer() {
-    return new Promise((resolve) => {
-        if (backendProcess) {
-            console.log('⚠️ Backend server already running');
-            resolve(true);
-            return;
-        }
-        
-        console.log('🚀 Starting backend server...');
-        
-        // Check if port 3001 is already in use (e.g., from npm run backend)
-        isPortInUse(3001).then((portInUse) => {
-            if (portInUse) {
-                console.log('✅ Backend already running on port 3001 (external). Skipping spawn.');
-                backendReady = true;
-                resolve(true);
-                return;
-            }
-            
-            startBackendWithSpawn(resolve);
-        }).catch(() => {
-            console.warn('⚠️ Could not check port, will attempt to start backend');
-            startBackendWithSpawn(resolve);
-        });
-    });
-}
-
-function startBackendWithSpawn(resolve) {
-    try {
-        let backendPath;
-        if (app.isPackaged) {
-            const candidates = [
-                path.join(__dirname, 'backend', 'server.cjs'),
-                path.join(process.resourcesPath, 'app', 'backend', 'server.cjs'),
-                path.join(process.resourcesPath, 'backend', 'server.cjs'),
-            ];
-            backendPath = candidates.find(p => fs.existsSync(p));
-            if (!backendPath) {
-                console.error('❌ Backend server file not found. Checked:');
-                candidates.forEach(p => console.error('   -', p, fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'));
-                resolve(false);
-                return;
-            }
-        } else {
-            backendPath = path.join(__dirname, 'backend', 'server.cjs');
-        }
-        
-        console.log('📂 Backend path:', backendPath);
-        
-        // Set up environment for packaged app
-        const env = { ...process.env };
-        
-        if (app.isPackaged) {
-            const appPath = path.dirname(app.getAppPath());
-            const nodeModulesPath = path.join(appPath, 'node_modules');
-            const resourcesPath = process.resourcesPath;
-            
-            console.log('📦 App path:', app.getAppPath());
-            console.log('📦 Resources path:', resourcesPath);
-            console.log('📦 Node modules path:', nodeModulesPath);
-            
-            env.NODE_PATH = nodeModulesPath + path.delimiter + (env.NODE_PATH || '');
-            env.dotenv_file = path.join(resourcesPath, 'app.asar.unpacked', '.env');
-        }
-        
-        // Spawn Node.js process for backend
-        backendProcess = spawn('node', [backendPath], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-            cwd: app.isPackaged ? process.resourcesPath : __dirname,
-            env: env
-        });
-        
-        // Set a timeout for backend readiness
-        const readyTimeout = setTimeout(() => {
-            if (!backendReady) {
-                console.warn('⚠️ Backend server not ready after timeout, continuing anyway');
-                resolve(false);
-            }
-        }, 15000);
-        
-        // Handle backend stdout
-        backendProcess.stdout.on('data', (data) => {
-            const output = data.toString();
-            console.log('🔵 Backend:', output.trim());
-            
-            if (output.includes('listening') || output.includes('started') || output.includes('3001')) {
-                backendReady = true;
-                clearTimeout(readyTimeout);
-                console.log('✅ Backend server ready!');
-                resolve(true);
-            }
-        });
-        
-        // Handle backend stderr
-        backendProcess.stderr.on('data', (data) => {
-            console.error('🔴 Backend error:', data.toString().trim());
-        });
-        
-        // Handle backend exit
-        backendProcess.on('close', (code) => {
-            clearTimeout(readyTimeout);
-            console.log(`🔵 Backend server exited with code ${code}`);
-            backendProcess = null;
-            backendReady = false;
-            resolve(false);
-        });
-        
-        // Handle spawn errors
-        backendProcess.on('error', (error) => {
-            clearTimeout(readyTimeout);
-            console.error('❌ Failed to start backend server:', error.message);
-            backendProcess = null;
-            backendReady = false;
-            resolve(false);
-        });
-    } catch (error) {
-        console.error('❌ Error starting backend server:', error.message);
-        backendProcess = null;
-        backendReady = false;
-        resolve(false);
-    }
-}
-
-// Stop backend server
-function stopBackendServer() {
-    if (backendProcess) {
-        console.log('🛑 Stopping backend server...');
-        backendProcess.kill();
-        backendProcess = null;
-        backendReady = false;
-    }
-}
+// Backend is not bundled — the app connects to the remote Railway backend.
 
 // Get dynamic spacing based on provider
 function getBrowserViewSpacing(provider) {
@@ -512,7 +354,6 @@ function stopDeepgramBridge() {
 // Stop all child processes and force exit
 function stopAllProcesses() {
     console.log('🛑 Stopping all processes...');
-    stopBackendServer();
     stopPythonBridge();
     stopDeepgramBridge();
     if (floatingWidget) {
@@ -594,160 +435,7 @@ function initializeVoiceProvider(voiceProvider, apiKey = '', lang = '', keyterms
     }, 500); // 500ms debounce
 }
 
-// Import auth functions (will be loaded dynamically)
-let authModule = null;
-function loadAuthModule() {
-    try {
-        let authPath;
-        if (app.isPackaged) {
-            // Various possible locations for auth.cjs in packaged app
-            const possiblePaths = [
-                path.join(process.resourcesPath, 'app', 'auth.cjs'),
-                path.join(process.resourcesPath, 'auth.cjs'),
-                path.join(process.resourcesPath, 'app.asar.unpacked', 'auth.cjs'),
-                path.join(__dirname, 'resources', 'app', 'auth.cjs'),
-                path.join(app.getAppPath(), 'auth.cjs')
-            ];
-            
-            console.log('🔍 Looking for auth.cjs in packaged app...');
-            console.log('   resourcesPath:', process.resourcesPath);
-            console.log('   app.getAppPath():', app.getAppPath());
-            
-            authPath = possiblePaths.find(p => {
-                const exists = fs.existsSync(p);
-                console.log('   Checking:', p, exists ? '✅' : '❌');
-                return exists;
-            });
-            
-            if (!authPath) {
-                console.error('❌ Auth module not found at any path');
-                possiblePaths.forEach(p => console.log('   - Not found:', p));
-                return;
-            }
-        } else {
-            authPath = path.join(__dirname, 'auth.cjs');
-        }
-        
-        console.log('📂 Loading auth from:', authPath);
-        authModule = require(authPath);
-        console.log('✅ Auth module loaded:', typeof authModule);
-    } catch (e) {
-        console.error('❌ Auth module failed to load:', e.message);
-        console.warn('Authentication features will not be available');
-    }
-}
-
-// Backend API URL - use env var or Railway URL for production
-
-// IPC Handlers for Authentication
-ipcMain.handle('auth-register', async (event, userData) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.registerUser(userData);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('auth-login', async (event, credentials) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.loginUser(credentials.username, credentials.password);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('auth-update-api-key', async (event, data) => {
-    console.log('🎯 IPC: auth-update-api-key received:', data);
-    if (!authModule) {
-        console.error('❌ Auth module not available');
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        const result = await authModule.updateUserApiKey(data.userId, data.provider, data.apiKey);
-        console.log('📤 IPC: Returning result:', result);
-        return result;
-    } catch (error) {
-        console.error('❌ IPC error:', error);
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('auth-update-settings', async (event, data) => {
-    console.log('🎯 IPC: auth-update-settings received:', data);
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        const result = await authModule.updateUserSettings(data.userId, data.settings);
-        return result;
-    } catch (error) {
-        console.error('❌ IPC auth-update-settings error:', error);
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('auth-update-shortcuts', async (event, data) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.updateUserShortcuts(data.userId, data.shortcuts);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-// ==================== MESSAGE/CONVERSATION IPC HANDLERS ====================
-
-ipcMain.handle('messages-save', async (event, data) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.saveMessage(data.userId, data.message);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('messages-save-history', async (event, data) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.saveConversationHistory(data.userId, data.history);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('messages-get-history', async (event, data) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.getConversationHistory(data.userId);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('messages-clear', async (event, data) => {
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        return await authModule.clearConversationHistory(data.userId);
-    } catch (error) {
-        return { success: false, message: error.message };
-    }
-});
+// Auth is handled via HTTP API calls to the remote backend — no local auth module needed.
 
 
 // ==================== WHISPER SPEECH RECOGNITION (Xenova Transformers) ====================
@@ -898,63 +586,15 @@ ipcMain.on('init-voice-provider', async (event, { voiceProvider, apiKey, languag
 // ==================== END WHISPER ====================
 
 
-ipcMain.handle('auth-get-user', async (event, data) => {
-    console.log('🎯 IPC: auth-get-user received:', data);
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        // Handle both formats: direct userId string or { userId } object
-        const userId = typeof data === 'string' ? data : data.userId;
-        const result = await authModule.getUserData(userId);
-        console.log('📤 IPC: Returning user data:', result.success ? 'Success' : 'Failed');
-        return result;
-    } catch (error) {
-        console.error('❌ IPC error:', error);
-        return { success: false, message: error.message };
-    }
-});
-
-ipcMain.handle('auth-resend-verification', async (event, data) => {
-    console.log('🎯 IPC: auth-resend-verification received:', data);
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        const email = typeof data === 'string' ? data : data.email;
-        const result = await authModule.resendVerificationEmail(email);
-        console.log('📤 IPC: Resend verification result:', result.success ? 'Success' : 'Failed');
-        return result;
-    } catch (error) {
-        console.error('❌ IPC error:', error);
-        return { success: false, message: error.message };
-    }
-});
-
-// Google OAuth Login via WebView (Frontend sends credential token)
-ipcMain.handle('auth-google-login', async (event, data) => {
-    console.log('🎯 IPC: auth-google-login received');
-    if (!authModule) {
-        return { success: false, message: 'Auth module not available' };
-    }
-    try {
-        const credential = typeof data === 'string' ? data : data.credential;
-        const result = await authModule.googleLogin(credential);
-        console.log('📤 IPC: Google login result:', result.success ? 'Success' : 'Failed');
-        return result;
-    } catch (error) {
-        console.error('❌ IPC error:', error);
-        return { success: false, message: error.message };
-    }
-});
+// Auth IPC handlers removed — all auth ops go directly to the Railway backend via HTTP API.
 
 let activeGoogleAuth = null;
 
 // Google OAuth for Electron – backend proxy with polling pattern
-ipcMain.handle('google-auth-electron', async () => {
+ipcMain.handle('google-auth-electron', async (event, backendUrlFromRenderer) => {
     console.log('🎯 IPC: google-auth-electron started');
     try {
-        const backendUrl = process.env.API_BACKEND_URL || 'http://localhost:3001';
+        const backendUrl = backendUrlFromRenderer || BACKEND_URL;
 
         // Get authorize URL from backend (backend handles OAuth redirect_uri)
         const authRes = await fetch(`${backendUrl}/api/auth/google/authorize`);
@@ -1769,19 +1409,10 @@ app.whenReady().then(() => {
         return;
     }
     
-    // Load auth module first
-    loadAuthModule();
+    // Create main setup window
     
-    // Start backend server (async, non-blocking). The frontend's init-voice-provider
-    // IPC handler has retry logic (5s) and will wait for backend readiness.
-    console.log('🚀 Starting backend server...');
-    startBackendServer().then(ready => {
-        console.log('🔧 Backend server startup result:', ready ? 'READY' : 'NOT READY');
-    }).catch(err => {
-        console.error('🔧 Backend server startup error:', err.message);
-    });
-    
-    // Create main setup window immediately (don't block on backend)
+    // Note: no local backend server is started — the app connects to the remote
+    // Railway backend (BACKEND_URL). The frontend handles all API calls directly.
     createMainWindow();
     
     // ==================== POWER MANAGEMENT ====================
@@ -1839,10 +1470,10 @@ app.whenReady().then(() => {
             }
         }
         
-        // Restore main window if it exists
+        // Restore main window if it exists — just show it, don't reload (avoids React state loss)
         if (mainWindow && !mainWindow.isDestroyed()) {
-            console.log('🔄 Reloading main window content...');
-            mainWindow.webContents.reload();
+            console.log('🔄 Restoring main window after sleep (no reload)');
+            mainWindow.show();
         }
         
         // Restart voice bridge if it died
@@ -2075,9 +1706,6 @@ app.on('activate', () => {
 });
 
 app.on('will-quit', () => {
-    // Stop backend server
-    stopBackendServer();
-    
     // Stop voice bridges
     stopPythonBridge();
     stopDeepgramBridge();

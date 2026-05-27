@@ -97,9 +97,7 @@
     "files": [
       "dist/**/*",
       "main.cjs",
-      "auth.cjs",
       "browser-preload.js",
-      "backend/**/*",
       "speech_bridge.py",
       "deepgram_speech_bridge.py",
       "deepgram_bridge.cjs",
@@ -107,8 +105,7 @@
       "!node_modules/ffi-napi/**/*",
       "!node_modules/ref-napi/**/*",
       "public/**/*",
-      "package.json",
-      ".env"
+      "package.json"
     ],
     "asar": false,
     "win": {
