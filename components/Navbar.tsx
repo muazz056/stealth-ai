@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDarkMode } from '../src/context/DarkModeContext';
 import { APP_CONFIG } from '../src/config';
 import TokenBadge from './TokenBadge';
+import stealthLogo from '../src/assets/stealth-logo.png';
 
 interface NavbarProps {
   user?: any;
@@ -53,7 +54,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, onNewSession, showSessi
             {logoError ? (
               <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm sm:text-base">SA</div>
             ) : (
-              <img src="./stealth-logo.png" alt={APP_CONFIG.NAME} className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" onError={() => setLogoError(true)} />
+              <img src={stealthLogo} alt={APP_CONFIG.NAME} className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-contain" onError={() => setLogoError(true)} />
             )}
             <div className="hidden sm:block">
               <h1 className="text-sm sm:text-lg font-black text-black dark:text-white uppercase italic">{APP_CONFIG.NAME}</h1>

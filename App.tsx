@@ -320,6 +320,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
   const [showContextSaved, setShowContextSaved] = useState(false);
   const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
   const [showManualSummarySaved, setShowManualSummarySaved] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [shortcuts, setShortcuts] = useState<ShortcutsState>(getDefaultShortcuts());
   const [shortcutErrors, setShortcutErrors] = useState<{[key: string]: string}>({});
   const [showShortcutsSuccess, setShowShortcutsSuccess] = useState(false);
@@ -561,6 +562,44 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
     refreshUser();
   }, []);
 
+  // Refresh data from DB (used by refresh button — no full page reload)
+  const handleRefreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      // Refresh user settings from DB
+      const latest = await authClient.getUser(user._id);
+      if (latest?.success && latest.user) {
+        const freshUser = latest.user;
+        const s = freshUser.settings || {};
+        setSettings({
+          basePrompt: s.basePrompt || '',
+          responseLanguage: s.responseLanguage || 'English',
+          basePromptSummary: s.basePromptSummary || '',
+          jobDescription: s.jobDescription || '',
+          jobDescriptionSummary: s.jobDescriptionSummary || '',
+          companyInfo: s.companyInfo || '',
+          companyInfoSummary: s.companyInfoSummary || '',
+          contextMessages: s.contextMessages || 5,
+          cvText: s.cvText || '',
+          cvSummary: s.cvSummary || ''
+        });
+        if (freshUser.deepgramLanguage) setDeepgramLanguage(freshUser.deepgramLanguage);
+        if (freshUser.deepgramKeyterms !== undefined) setDeepgramKeyterms(freshUser.deepgramKeyterms);
+        const mergedUser = { ...user, ...freshUser };
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
+      }
+      // Refresh chat history from DB
+      const historyResult = await messagesClient.getHistory(user._id);
+      if (historyResult.success && historyResult.history) {
+        setChatHistory(historyResult.history);
+      }
+    } catch (error) {
+      console.error('❌ Data refresh failed:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Manually save edited summaries (user-provided)
   const handleSaveManualSummaries = async () => {
     try {
@@ -590,6 +629,11 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         if (updatedSettings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', updatedSettings.jobDescriptionSummary);
         if (updatedSettings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', updatedSettings.companyInfoSummary);
         if (updatedSettings.responseLanguage) localStorage.setItem('isa_response_language', updatedSettings.responseLanguage);
+        // Notify other windows (Electron overlay, other browser tabs)
+        if (typeof window !== 'undefined' && (window as any).require) {
+          const { ipcRenderer } = (window as any).require('electron');
+          ipcRenderer.send('notify-overlay-settings-changed', { settings: updatedSettings, deepgramLanguage, deepgramKeyterms });
+        }
         setShowManualSummarySaved(true);
         setTimeout(() => setShowManualSummarySaved(false), 2500);
       } else {
@@ -1292,6 +1336,33 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       ipcRenderer.on('toggle-listen-answer', handleToggleListenAnswer);
       ipcRenderer.on('trigger-direct-answer', handleTriggerDirectAnswer);
 
+      // Handle settings updates from overlay (instant cross-platform sync)
+      const handleSettingsUpdated = (_event: any, payload?: any) => {
+        if (payload?.settings) {
+          setSettings(prev => ({ ...prev, ...payload.settings }));
+          if (payload.settings.responseLanguage) {
+            localStorage.setItem('isa_response_language', payload.settings.responseLanguage);
+          }
+          // Update user in localStorage
+          const userStr = localStorage.getItem(LS_USER_KEY);
+          if (userStr) {
+            try {
+              const u = JSON.parse(userStr);
+              u.settings = { ...(u.settings || {}), ...payload.settings };
+              localStorage.setItem(LS_USER_KEY, JSON.stringify(u));
+            } catch (_) {}
+          }
+        }
+        if (payload?.deepgramLanguage !== undefined) {
+          setDeepgramLanguage(payload.deepgramLanguage);
+        }
+        if (payload?.deepgramKeyterms !== undefined) {
+          setDeepgramKeyterms(payload.deepgramKeyterms);
+        }
+      };
+
+      ipcRenderer.on('settings-updated', handleSettingsUpdated);
+
       // Cleanup
       return () => {
         ipcRenderer.removeListener('python-speech', handlePythonSpeech);
@@ -1299,6 +1370,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         ipcRenderer.removeListener('chat-history-updated', handleChatHistoryUpdate);
         ipcRenderer.removeListener('toggle-listen-answer', handleToggleListenAnswer);
         ipcRenderer.removeListener('trigger-direct-answer', handleTriggerDirectAnswer);
+        ipcRenderer.removeListener('settings-updated', handleSettingsUpdated);
       };
 
     } else {
@@ -2457,11 +2529,12 @@ Respond in ${langDisplay}.]`;
             <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Voice Assist</h2>
             {typeof window !== 'undefined' && (window as any).require && (
               <button
-                onClick={() => window.location.reload()}
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
                 title="Refresh data from database"
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
@@ -2490,7 +2563,7 @@ Respond in ${langDisplay}.]`;
                     // Notify overlay immediately
                     if (typeof window !== 'undefined' && (window as any).require) {
                       const { ipcRenderer } = (window as any).require('electron');
-                      ipcRenderer.send('notify-overlay-settings-changed');
+                      ipcRenderer.send('notify-overlay-settings-changed', { settings, deepgramLanguage: val, deepgramKeyterms });
                     }
                   }
                 } catch (_) {}
@@ -2534,7 +2607,7 @@ Respond in ${langDisplay}.]`;
                     localStorage.setItem('isa_response_language', val);
                     if (typeof window !== 'undefined' && (window as any).require) {
                       const { ipcRenderer } = (window as any).require('electron');
-                      ipcRenderer.send('notify-overlay-settings-changed');
+                      ipcRenderer.send('notify-overlay-settings-changed', { settings: { ...settings, responseLanguage: val }, deepgramLanguage, deepgramKeyterms });
                     }
                   }
                 } catch (_) {}
@@ -2608,7 +2681,7 @@ Respond in ${langDisplay}.]`;
                   if (typeof window !== 'undefined' && (window as any).require) {
                     const { ipcRenderer } = (window as any).require('electron');
                     ipcRenderer.send('init-voice-provider', { voiceProvider, apiKey: user?.deepgramApiKey || '', language: deepgramLanguage, keyterms: deepgramKeyterms });
-                    ipcRenderer.send('notify-overlay-settings-changed');
+                    ipcRenderer.send('notify-overlay-settings-changed', { settings: { ...settings, responseLanguage: settings.responseLanguage }, deepgramLanguage, deepgramKeyterms });
                   } else if (isListeningRef.current) {
                     // Vite/web: restart voice with new settings
                     if (stopListenRef.current) stopListenRef.current();

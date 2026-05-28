@@ -1800,12 +1800,16 @@ ipcMain.on('close-overlay', () => {
     }
 });
 
-ipcMain.on('notify-overlay-settings-changed', () => {
-    console.log('📢 Settings changed - notifying overlay...');
+ipcMain.on('notify-overlay-settings-changed', (_event, settingsPayload) => {
+    console.log('📢 Settings changed - notifying all windows...');
+    const payload = settingsPayload || {};
     if (overlayWindow && !overlayWindow.isDestroyed()) {
-        overlayWindow.webContents.send('settings-updated');
-        console.log('✅ Overlay notified of settings update');
+        overlayWindow.webContents.send('settings-updated', payload);
     }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('settings-updated', payload);
+    }
+    console.log('✅ All windows notified of settings update');
 });
 
 // Chat history update notification

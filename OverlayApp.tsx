@@ -881,10 +881,41 @@ const OverlayApp: React.FC = () => {
         setCurrentPairIndex(0);
       });
       
-      // Listen for settings update signal (Real-Time Sync)
-      ipcRenderer.on('settings-updated', () => {
-        console.log('⚡ Settings updated - reloading from localStorage...');
-        
+      // Listen for settings update signal (Real-Time Sync with payload)
+      ipcRenderer.on('settings-updated', (_event: any, payload?: any) => {
+        console.log('⚡ Settings updated - applying changes...', payload ? 'with payload' : 'fallback to localStorage');
+
+        // Apply payload immediately (no network round-trip) — settings, deepgramLanguage, deepgramKeyterms
+        if (payload?.settings) {
+          setOverlayUserSettings((prev: any) => ({ ...prev, ...payload.settings }));
+          if (payload.settings.responseLanguage) {
+            localStorage.setItem('isa_response_language', payload.settings.responseLanguage);
+          }
+          if (payload.settings.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, payload.settings.basePrompt);
+          if (payload.settings.jobDescription) localStorage.setItem(LS_JD_KEY, payload.settings.jobDescription);
+          if (payload.settings.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, payload.settings.companyInfo);
+          if (payload.settings.cvText) localStorage.setItem(LS_RESUME_CONTENT_KEY, payload.settings.cvText);
+          if (payload.settings.cvSummary) localStorage.setItem('isa_cv_summary', payload.settings.cvSummary);
+          if (payload.settings.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', payload.settings.basePromptSummary);
+          if (payload.settings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', payload.settings.jobDescriptionSummary);
+          if (payload.settings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', payload.settings.companyInfoSummary);
+          // Update user in localStorage
+          const userStr = localStorage.getItem(LS_USER_KEY);
+          if (userStr) {
+            try {
+              const u = JSON.parse(userStr);
+              u.settings = { ...(u.settings || {}), ...payload.settings };
+              localStorage.setItem(LS_USER_KEY, JSON.stringify(u));
+            } catch (_) {}
+          }
+        }
+        if (payload?.deepgramLanguage !== undefined) {
+          setCurrentLanguage(payload.deepgramLanguage);
+        }
+        if (payload?.deepgramKeyterms !== undefined) {
+          setCurrentKeyterms(payload.deepgramKeyterms);
+        }
+
         // Refresh API provider/key from localStorage
         const keysStr = localStorage.getItem(LS_API_KEYS);
         const provider = (localStorage.getItem(LS_API_PROVIDER) as 'gemini' | 'openai' | 'claude' | 'groq') || 'gemini';
@@ -908,14 +939,14 @@ const OverlayApp: React.FC = () => {
               const user = JSON.parse(userStr);
               const voiceProvider = user.voiceProvider || 'default';
               const apiKey = user.deepgramApiKey || '';
-              const dgLang = user.deepgramLanguage || 'multi';
-              const dgKeyterms = user.deepgramKeyterms || '';
-              
+              const dgLang = payload?.deepgramLanguage || user.deepgramLanguage || 'multi';
+              const dgKeyterms = payload?.deepgramKeyterms !== undefined ? payload.deepgramKeyterms : (user.deepgramKeyterms || '');
+
               // Update state for UI
               setCurrentVoiceProvider(voiceProvider as 'default' | 'deepgram');
               setCurrentLanguage(dgLang);
               setCurrentKeyterms(dgKeyterms);
-              
+
               console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log('🎤 [Overlay] Voice provider settings update');
               console.log('🎤 [Overlay] Provider:', voiceProvider);
@@ -923,13 +954,13 @@ const OverlayApp: React.FC = () => {
               console.log('🎤 [Overlay] Language:', dgLang);
               console.log('🎤 [Overlay] Keyterms:', !!dgKeyterms);
               console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-              
+
               ipcRenderer.send('init-voice-provider', {
                 voiceProvider,
                 language: dgLang,
                 keyterms: dgKeyterms
               });
-              
+
               console.log('✅ [Overlay] Voice provider init command sent');
             }
           } catch (e) {
@@ -1166,6 +1197,26 @@ const OverlayApp: React.FC = () => {
       document.body.classList.remove('overlay-mode');
       if (recognitionRef.current) recognitionRef.current.stop();
     };
+  }, []); // eslint-disable-next-line react-hooks/exhaustive-deps
+
+  // Cross-platform settings sync: pick up changes from other tabs/windows via localStorage
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === LS_USER_KEY && e.newValue) {
+        try {
+          const updatedUser = JSON.parse(e.newValue);
+          const s = updatedUser.settings || {};
+          setOverlayUserSettings((prev: any) => ({ ...prev, ...s }));
+          if (updatedUser.deepgramLanguage) setCurrentLanguage(updatedUser.deepgramLanguage);
+          if (updatedUser.deepgramKeyterms !== undefined) setCurrentKeyterms(updatedUser.deepgramKeyterms);
+          if (s.responseLanguage) localStorage.setItem('isa_response_language', s.responseLanguage);
+          // Also update voice provider
+          if (updatedUser.voiceProvider) setCurrentVoiceProvider(updatedUser.voiceProvider);
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   // Convert chat history to Q&A pairs whenever history changes
@@ -3428,7 +3479,7 @@ ${companyInfoSummary}`;
                               language: newLang,
                               keyterms: keyterms
                             });
-                            ipcRenderer.send('notify-overlay-settings-changed');
+                            ipcRenderer.send('notify-overlay-settings-changed', { settings: user.settings || {}, deepgramLanguage: newLang, deepgramKeyterms: keyterms });
                             console.log('✅ [Overlay] Voice provider re-initialized with new language');
                           }
                         } else {
@@ -3482,7 +3533,7 @@ ${companyInfoSummary}`;
                           // Notify main app to refresh settings
                           if (typeof window !== 'undefined' && (window as any).require) {
                             const { ipcRenderer } = (window as any).require('electron');
-                            ipcRenderer.send('notify-overlay-settings-changed');
+                            ipcRenderer.send('notify-overlay-settings-changed', { settings: { ...user.settings, responseLanguage: lang }, deepgramLanguage: currentLanguage, deepgramKeyterms: currentKeyterms });
                           }
                         } else {
                           console.error('❌ [Overlay] Failed to save response language:', await response.text());
@@ -3578,7 +3629,7 @@ ${companyInfoSummary}`;
                             language: currentLanguage,
                             keyterms: currentKeyterms
                           });
-                          ipcRenderer.send('notify-overlay-settings-changed');
+                          ipcRenderer.send('notify-overlay-settings-changed', { settings: user.settings || {}, deepgramLanguage: currentLanguage, deepgramKeyterms: currentKeyterms });
                         }
                         console.log('✅ [Overlay] Keywords saved to database');
                       }
