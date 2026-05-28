@@ -1446,12 +1446,27 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
       return;
     }
 
-    // Check transcription limits before starting
+    // Update UI immediately — no delay for button state change
+    setIsListening(true);
+    wantToListenRef.current = true;
+
+    // Record start time for tracking
+    transcriptionStartTimeRef.current = Date.now();
+
+    setTranscribedText('');
+    setCommittedText('');
+    setInterimText('');
+    setManualTextInput('');
+    setAiResponse('');
+
+    // Check transcription limits before starting (async, non-blocking for UI)
     const userForListen = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
     const isAdminUser = userForListen.role === 'admin' || userForListen.role === 'super-admin' || userForListen.tokens === -1;
     if (!isAdminUser && userForListen._id) {
       const listenCheck = await tokensClient.checkListen(userForListen._id);
       if (!listenCheck.canListen) {
+        wantToListenRef.current = false;
+        setIsListening(false);
         if (listenCheck.reason === 'out_of_tokens') {
           setShowOutOfTokensModal(true);
         } else if (listenCheck.reason === 'transcription_limit') {
@@ -1465,17 +1480,6 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         return;
       }
     }
-
-    wantToListenRef.current = true;
-
-    // Record start time for tracking
-    transcriptionStartTimeRef.current = Date.now();
-
-    setTranscribedText('');
-    setCommittedText('');
-    setInterimText('');
-    setManualTextInput('');
-    setAiResponse('');
     
     // Determine effective voice provider and possible Deepgram config
     let effectiveVoiceProvider = voiceProvider;
@@ -2595,10 +2599,10 @@ Respond in ${langDisplay}.]`;
               value={settings.responseLanguage || ''}
               onChange={(val) => setSettings(prev => ({ ...prev, responseLanguage: val }))}
               onBlur={async (val) => {
+                if (!val || !val.trim()) return;
                 try {
                   const res = await apiClient('/auth/settings', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: val } })
                   });
                   if (res.ok) {
@@ -2609,10 +2613,16 @@ Respond in ${langDisplay}.]`;
                       const { ipcRenderer } = (window as any).require('electron');
                       ipcRenderer.send('notify-overlay-settings-changed', { settings: { ...settings, responseLanguage: val }, deepgramLanguage, deepgramKeyterms });
                     }
+                  } else {
+                    const errBody = await res.json().catch(() => ({}));
+                    console.error('❌ Response language save failed:', res.status, errBody);
                   }
-                } catch (_) {}
+                } catch (err) {
+                  console.error('❌ Response language save error:', err);
+                }
               }}
               placeholder="Search language..."
+              selectOnly
             />
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1.5">
               Enter the language for AI responses (e.g. English, Spanish)
@@ -2643,6 +2653,8 @@ Respond in ${langDisplay}.]`;
             <button
               onClick={async () => {
                 try {
+                  let allSuccess = true;
+
                   // Save transcription language
                   const langRes = await apiClient('/auth/deepgram-language', {
                     method: 'PUT',
@@ -2652,6 +2664,9 @@ Respond in ${langDisplay}.]`;
                   if (langRes.ok) {
                     const updatedUser = { ...user, deepgramLanguage };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                  } else {
+                    allSuccess = false;
+                    console.error('❌ Failed to save transcription language:', langResult);
                   }
 
                   // Save response language
@@ -2664,6 +2679,9 @@ Respond in ${langDisplay}.]`;
                     const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', settings.responseLanguage);
+                  } else {
+                    allSuccess = false;
+                    console.error('❌ Failed to save response language:', settingsResult);
                   }
 
                   // Save keywords
@@ -2675,6 +2693,9 @@ Respond in ${langDisplay}.]`;
                   if (keyRes.ok) {
                     const updatedUser = { ...user, deepgramKeyterms };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                  } else {
+                    allSuccess = false;
+                    console.error('❌ Failed to save keywords:', keyResult);
                   }
 
                   // Notify overlay and reinit voice provider
@@ -2690,8 +2711,10 @@ Respond in ${langDisplay}.]`;
                     }, 500);
                   }
 
-                  setShowVoiceSuccess(true);
-                  setTimeout(() => setShowVoiceSuccess(false), 3000);
+                  if (allSuccess) {
+                    setShowVoiceSuccess(true);
+                    setTimeout(() => setShowVoiceSuccess(false), 3000);
+                  }
                 } catch (error) {
                   console.error('Failed to save audio settings:', error);
                 }

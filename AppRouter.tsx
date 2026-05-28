@@ -34,6 +34,7 @@ const AppRouterContent: React.FC = () => {
   const [showSetupLoader, setShowSetupLoader] = useState(false);
   const [setupCountdown, setSetupCountdown] = useState(8);
   const [authChecked, setAuthChecked] = useState(false);
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' && !navigator.onLine);
 
   // Detect if running in Electron
   const isElectron = typeof window !== 'undefined' && (window as any).require;
@@ -66,6 +67,18 @@ const AppRouterContent: React.FC = () => {
       if (activityCheckRef.current) clearInterval(activityCheckRef.current);
     };
   }, [isAuthenticated]);
+
+  // Track online/offline status
+  useEffect(() => {
+    const goOnline = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
 
   // Register token expiry callback
   useEffect(() => {
@@ -100,6 +113,22 @@ const AppRouterContent: React.FC = () => {
   // Check authentication on mount
   useEffect(() => {
     const initAuth = async () => {
+      // If offline, skip network calls and just check localStorage
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        // Try to load user from localStorage even when offline
+        const savedUser = localStorage.getItem(LS_USER_KEY);
+        if (savedUser) {
+          try {
+            const user = JSON.parse(savedUser);
+            saveUser(user);
+          } catch (e) {
+            localStorage.removeItem(LS_USER_KEY);
+          }
+        }
+        setAuthChecked(true);
+        return;
+      }
+
       // Try to restore session from refresh token
       const refreshToken = getRefreshToken();
       if (refreshToken) {
@@ -285,9 +314,44 @@ const AppRouterContent: React.FC = () => {
     }
   };
 
-  // Don't render until auth check completes (prevents flash)
+  // Show loading spinner / offline error while auth check runs
   if (!authChecked && !showSetupLoader) {
-    return null;
+    return (
+      <div className="fixed inset-0 bg-white dark:bg-slate-950 flex items-center justify-center z-[10000] transition-colors duration-300">
+        <div className="flex flex-col items-center gap-6">
+          {isOffline ? (
+            <>
+              <div className="w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <svg className="w-10 h-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m-2.829-2.829a5 5 0 000-7.07m-4.243 4.243a1 1 0 010-1.414M3 3l18 18" />
+                </svg>
+              </div>
+              <div className="text-center space-y-2">
+                <h3 className="text-2xl font-bold text-red-600 dark:text-red-400">No Internet Connection</h3>
+                <p className="text-slate-600 dark:text-slate-400 text-sm">Please check your connection and try again.</p>
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-blue-500/10 dark:border-blue-500/20 rounded-full absolute"></div>
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <div className="text-center space-y-1">
+                <h3 className="text-xl font-bold text-black dark:text-white">Loading...</h3>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Initializing application</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -326,6 +390,13 @@ const AppRouterContent: React.FC = () => {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Offline banner */}
+      {authChecked && isOffline && (
+        <div className="fixed top-0 left-0 right-0 bg-red-500/90 dark:bg-red-600/90 text-white text-center py-2 px-4 text-sm font-medium z-[9999] backdrop-blur-sm">
+          No internet connection — some features may be unavailable
         </div>
       )}
 

@@ -1518,28 +1518,9 @@ const OverlayApp: React.FC = () => {
       console.log('⏭️ handleStartListen skipped - already started');
       return;
     }
+    // Update UI immediately — no delay for button state change
+    setIsListening(true);
     isStartedRef.current = true;
-
-    // Check transcription limits before starting
-    const userForListen = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
-    const isAdminUser = userForListen.role === 'admin' || userForListen.role === 'super-admin' || userForListen.tokens === -1;
-    if (!isAdminUser) {
-      const listenCheck = await tokensClient.checkListen(userForListen._id || '');
-      if (!listenCheck.canListen) {
-        isStartedRef.current = false;
-        if (listenCheck.reason === 'out_of_tokens') {
-          setShowOutOfTokensModal(true);
-        } else if (listenCheck.reason === 'transcription_limit') {
-          setModalInfo({
-            title: 'Transcription Limit Reached',
-            message: 'You have used all 25 minutes of free transcription. Upgrade to Pro for unlimited transcription.',
-            variant: 'warning',
-            icon: '🎤'
-          });
-        }
-        return;
-      }
-    }
 
     // Record start time for tracking
     transcriptionStartTimeRef.current = Date.now();
@@ -1554,6 +1535,28 @@ const OverlayApp: React.FC = () => {
     setInterimText('');
     // Don't clear manualTextInput - keep existing typed text
     setAiResponse('');
+
+    // Check transcription limits (async, non-blocking for UI)
+    const userForListen = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
+    const isAdminUser = userForListen.role === 'admin' || userForListen.role === 'super-admin' || userForListen.tokens === -1;
+    if (!isAdminUser) {
+      const listenCheck = await tokensClient.checkListen(userForListen._id || '');
+      if (!listenCheck.canListen) {
+        isStartedRef.current = false;
+        setIsListening(false);
+        if (listenCheck.reason === 'out_of_tokens') {
+          setShowOutOfTokensModal(true);
+        } else if (listenCheck.reason === 'transcription_limit') {
+          setModalInfo({
+            title: 'Transcription Limit Reached',
+            message: 'You have used all 25 minutes of free transcription. Upgrade to Pro for unlimited transcription.',
+            variant: 'warning',
+            icon: '🎤'
+          });
+        }
+        return;
+      }
+    }
     
     const startDeepgramRecorder = async (stream: MediaStream, language: string, keyterms: string) => {
       // Clean up any previous capture session before starting a new one
