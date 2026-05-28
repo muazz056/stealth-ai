@@ -315,7 +315,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     } catch (e) {}
     return '';
   });
-const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
+  const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
+  const [voiceSuccessText, setVoiceSuccessText] = useState('');
   const [showSettingsSaved, setShowSettingsSaved] = useState(false);
   const [showContextSaved, setShowContextSaved] = useState(false);
   const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
@@ -520,7 +521,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         // Update state with freshest settings
         setSettings({
           basePrompt: s.basePrompt || '',
-          responseLanguage: s.responseLanguage || 'English',
+          responseLanguage: s.responseLanguage || '',
           basePromptSummary: s.basePromptSummary || '',
           jobDescription: s.jobDescription || '',
           jobDescriptionSummary: s.jobDescriptionSummary || '',
@@ -573,7 +574,7 @@ const [showVoiceSuccess, setShowVoiceSuccess] = useState(false);
         const s = freshUser.settings || {};
         setSettings({
           basePrompt: s.basePrompt || '',
-          responseLanguage: s.responseLanguage || 'English',
+          responseLanguage: s.responseLanguage || '',
           basePromptSummary: s.basePromptSummary || '',
           jobDescription: s.jobDescription || '',
           jobDescriptionSummary: s.jobDescriptionSummary || '',
@@ -2653,48 +2654,52 @@ Respond in ${langDisplay}.]`;
             <button
               onClick={async () => {
                 try {
-                  let allSuccess = true;
+                  let savedCount = 0;
+                  let totalCount = 0;
 
                   // Save transcription language
+                  totalCount++;
                   const langRes = await apiClient('/auth/deepgram-language', {
                     method: 'PUT',
                     body: JSON.stringify({ userId: user._id, deepgramLanguage })
                   });
                   const langResult = await langRes.json();
                   if (langRes.ok) {
+                    savedCount++;
                     const updatedUser = { ...user, deepgramLanguage };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                   } else {
-                    allSuccess = false;
                     console.error('❌ Failed to save transcription language:', langResult);
                   }
 
                   // Save response language
+                  totalCount++;
                   const settingsRes = await apiClient('/auth/settings', {
                     method: 'PUT',
                     body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: settings.responseLanguage } })
                   });
                   const settingsResult = await settingsRes.json();
                   if (settingsResult.success) {
+                    savedCount++;
                     const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', settings.responseLanguage);
                   } else {
-                    allSuccess = false;
                     console.error('❌ Failed to save response language:', settingsResult);
                   }
 
                   // Save keywords
+                  totalCount++;
                   const keyRes = await apiClient('/auth/deepgram-keyterms', {
                     method: 'PUT',
                     body: JSON.stringify({ userId: user._id, deepgramKeyterms })
                   });
                   const keyResult = await keyRes.json();
                   if (keyRes.ok) {
+                    savedCount++;
                     const updatedUser = { ...user, deepgramKeyterms };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                   } else {
-                    allSuccess = false;
                     console.error('❌ Failed to save keywords:', keyResult);
                   }
 
@@ -2711,8 +2716,9 @@ Respond in ${langDisplay}.]`;
                     }, 500);
                   }
 
-                  if (allSuccess) {
+                  if (savedCount > 0) {
                     setShowVoiceSuccess(true);
+                    setVoiceSuccessText(savedCount === totalCount ? 'Audio Settings Saved' : `Saved ${savedCount}/${totalCount} settings`);
                     setTimeout(() => setShowVoiceSuccess(false), 3000);
                   }
                 } catch (error) {
@@ -2730,7 +2736,7 @@ Respond in ${langDisplay}.]`;
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                Audio Settings Saved
+                {voiceSuccessText}
               </div>
             )}
           </div>

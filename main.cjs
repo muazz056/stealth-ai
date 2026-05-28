@@ -604,7 +604,19 @@ ipcMain.handle('google-auth-electron', async (event, backendUrlFromRenderer) => 
         }
 
         // Open in the system browser
-        shell.openExternal(authData.url);
+        try {
+            await shell.openExternal(authData.url);
+        } catch (openErr) {
+            console.error('❌ Failed to open browser for Google auth:', openErr);
+            return { success: false, message: 'Could not open browser. Please try again or use email sign-in.' };
+        }
+
+        // Notify renderer that browser was opened
+        if (event.sender && !event.sender.isDestroyed()) {
+            try {
+                event.sender.send('google-auth-browser-opened', true);
+            } catch (e) {}
+        }
 
         // Poll backend for the auth result
         const state = authData.state;

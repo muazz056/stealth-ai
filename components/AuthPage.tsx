@@ -75,6 +75,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [googleAuthMessage, setGoogleAuthMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
@@ -146,14 +147,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     try {
       setLoading(true);
       setError('');
+      setGoogleAuthMessage('Opening browser for Google sign-in...');
       const { ipcRenderer } = (window as any).require('electron');
+
+      // Listen for browser-open confirmation
+      const onBrowserOpened = () => {
+        setGoogleAuthMessage('Browser opened. Please complete sign-in there, then return to this window.');
+      };
+      ipcRenderer.once('google-auth-browser-opened', onBrowserOpened);
+
       const result = await ipcRenderer.invoke('google-auth-electron', API_CONFIG.BASE_URL);
+      ipcRenderer.removeListener('google-auth-browser-opened', onBrowserOpened);
+
       if (result.success) {
+        setGoogleAuthMessage('');
         onAuthSuccess(result.user, result.accessToken, result.refreshToken);
       } else {
+        setGoogleAuthMessage('');
         setError(result.message || 'Google login failed');
       }
     } catch (err: any) {
+      setGoogleAuthMessage('');
       setError('Google login failed: ' + err.message);
       console.error('Electron Google auth error:', err);
     } finally {
@@ -286,6 +300,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             <div className="flex items-start gap-3">
               <span className="text-red-600 dark:text-red-400 text-xl">⚠️</span>
               <p className="text-red-700 dark:text-red-300 text-sm font-medium flex-1">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Google Auth Status Message */}
+        {googleAuthMessage && (
+          <div className="mb-6 p-4 bg-blue-100 dark:bg-blue-500/10 border border-blue-300 dark:border-blue-500/30 rounded-xl backdrop-blur-sm">
+            <div className="flex items-start gap-3">
+              <span className="text-blue-600 dark:text-blue-400">ℹ️</span>
+              <p className="text-blue-700 dark:text-blue-300 text-sm font-medium flex-1">{googleAuthMessage}</p>
             </div>
           </div>
         )}

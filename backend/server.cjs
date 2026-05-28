@@ -566,6 +566,85 @@ function getDefaultShortcuts() {
   };
 }
 
+// Ensure user document has all required default fields (settings, shortcuts, transcriptionSeconds)
+async function ensureUserDefaults(userId, usersCollection) {
+  const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+  if (!user) return;
+
+  const updates = {};
+  if (!user.settings) {
+    updates.settings = {
+      basePrompt: DEFAULT_BASE_PROMPT,
+      responseLanguage: 'English',
+      basePromptSummary: '',
+      jobDescription: '',
+      jobDescriptionSummary: '',
+      companyInfo: '',
+      companyInfoSummary: '',
+      contextMessages: 5,
+      cvText: '',
+      cvSummary: ''
+    };
+  }
+  if (!user.shortcuts) {
+    updates.shortcuts = getDefaultShortcuts();
+  }
+  if (user.transcriptionSeconds === undefined || user.transcriptionSeconds === null) {
+    updates.transcriptionSeconds = 0;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    console.log('🔧 Migrating missing defaults for user:', userId);
+    console.log('📦 Fields to add:', Object.keys(updates));
+    await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: updates });
+  }
+}
+
+// Default base prompt for new users
+const DEFAULT_BASE_PROMPT = `You are a real-time AI assistant built for live conversations.
+
+CONTEXT RULES:
+1. Document = single source of truth
+- Use mentioned skills, experience, projects, education
+- NEVER invent, exaggerate, or assume
+2. Description provided = align answers directly to it
+3. Info provided = tailor responses accordingly
+4. No context = use best practices
+
+ANSWER STRUCTURE:
+- Professional, confident tone, important information first
+
+TRANSCRIPTION ROBUSTNESS:
+- Assume live audio transcription may be imperfect, incomplete, or phonetically inaccurate
+- Intelligently analyze intent using provided context
+
+CLARIFICATION:
+- If multiple interpretations possible:
+- Choose most likely one based on context (Job description or resume)
+- Answer directly without asking clarifying questions or mentioning in the response.
+
+RESPONSE BEHAVIOR:
+- Do NOT mention transcription errors or corrections
+- Do NOT explain correction process
+- Never mention you are AI or language model
+- Answer confidently as if question was clearly spoken
+
+CODING/TECHNICAL QUESTIONS:
+- Provide correct, clean code or technical explanation
+- Explain each approach if necessary
+
+EXAMPLES:
+- Give examples to improve clarity
+
+OUTPUT:
+- No emojis
+- Use markdown formatting when helpful
+
+QUESTION CLASSIFICATION:
+- If question is RELATED to previous topic (follow-up, clarification, deeper dive): Answer IN CONTEXT
+- If question is COMPLETELY NEW (different topic): Answer independently
+- Let AI determine relationship based on topic similarity`;
+
 // ==================== AUTH ROUTES ====================
 
 // Register
@@ -785,6 +864,9 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    // Auto-migrate missing default fields (settings, shortcuts, etc.)
+    await ensureUserDefaults(user._id.toString(), users);
+
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
 
@@ -848,6 +930,8 @@ app.post('/api/auth/refresh', async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+    // Auto-migrate missing default fields
+    await ensureUserDefaults(decoded.userId, users);
     const newAccessToken = generateAccessToken(user);
     const newRefreshToken = generateRefreshToken(user);
     const { password: _, ...userWithoutPassword } = user;
@@ -1106,6 +1190,9 @@ app.post('/api/auth/google', async (req, res) => {
         { _id: user._id },
         { $set: updates }
       );
+
+      // Auto-migrate missing default fields
+      await ensureUserDefaults(user._id.toString(), users);
     } else {
       // Create new user with auto-verified = true
       const newUser = {
@@ -1121,6 +1208,7 @@ app.post('/api/auth/google', async (req, res) => {
         role: 'user',
         plan: 'Free',
         tokens: 10,
+        transcriptionSeconds: 0,
         createdAt: new Date(),
         apiKeys: {},
         selectedProvider: '',
@@ -1323,6 +1411,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
       if (!user.googleId) updates.googleId = googleId;
       if (!user.verified) updates.verified = true;
       await users.updateOne({ _id: user._id }, { $set: updates });
+      // Auto-migrate missing default fields
+      await ensureUserDefaults(user._id.toString(), users);
     } else {
       const newUser = {
         username: email.split('@')[0],
@@ -1339,6 +1429,19 @@ app.get('/api/auth/google/callback', async (req, res) => {
         apiKeys: {}, selectedProvider: '',
         voiceProvider: 'default', deepgramApiKey: '',
         deepgramLanguage: 'multi', deepgramKeyterms: '',
+        settings: {
+          basePrompt: DEFAULT_BASE_PROMPT,
+          responseLanguage: 'English',
+          basePromptSummary: '',
+          jobDescription: '',
+          jobDescriptionSummary: '',
+          companyInfo: '',
+          companyInfoSummary: '',
+          contextMessages: 5,
+          cvText: '',
+          cvSummary: ''
+        },
+        shortcuts: getDefaultShortcuts()
       };
       const result = await users.insertOne(newUser);
       user = { ...newUser, _id: result.insertedId };
@@ -1410,8 +1513,14 @@ app.get('/api/auth/user/:userId', authMiddleware, requireOwnUser, async (req, re
       });
     }
 
+    // Auto-migrate missing default fields (settings, shortcuts, etc.)
+    await ensureUserDefaults(userId, users);
+
+    // Refetch after migration
+    const migratedUser = await users.findOne({ _id: new ObjectId(userId) });
+
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...userWithoutPassword } = migratedUser;
 
     res.json({
       success: true,
@@ -1504,9 +1613,15 @@ app.put('/api/auth/settings', authMiddleware, requireOwnUser, async (req, res) =
     console.log('⚙️ Updating user settings for:', userId);
     console.log('📝 Settings:', settings);
 
+    // Build dot-notation updates to merge, not replace
+    const settingsUpdate = {};
+    for (const [key, value] of Object.entries(settings)) {
+      settingsUpdate[`settings.${key}`] = value;
+    }
+
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      { $set: { settings } }
+      { $set: settingsUpdate }
     );
 
     console.log('✅ Settings update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
