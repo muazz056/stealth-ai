@@ -592,6 +592,9 @@ async function ensureUserDefaults(userId, usersCollection) {
   if (user.transcriptionSeconds === undefined || user.transcriptionSeconds === null) {
     updates.transcriptionSeconds = 0;
   }
+  if (!user.responseLanguage) {
+    updates.responseLanguage = 'English';
+  }
 
   if (Object.keys(updates).length > 0) {
     console.log('🔧 Migrating missing defaults for user:', userId);
@@ -769,6 +772,7 @@ OUTPUT:
       deepgramApiKey: '', // Empty by default
       deepgramLanguage: 'multi', // Default: multilingual
       deepgramKeyterms: '', // Comma-separated important keywords for better recognition
+      responseLanguage: 'English', // Default response language (standalone field)
       settings: {
         basePrompt: DEFAULT_BASE_PROMPT,
         responseLanguage: 'English', // Default response language
@@ -1216,6 +1220,7 @@ app.post('/api/auth/google', async (req, res) => {
         deepgramApiKey: '',
         deepgramLanguage: 'multi',
         deepgramKeyterms: '',
+        responseLanguage: 'English',
         settings: {
           basePrompt: `You are a real-time AI assistant built for live conversations.
 
@@ -1429,6 +1434,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
         apiKeys: {}, selectedProvider: '',
         voiceProvider: 'default', deepgramApiKey: '',
         deepgramLanguage: 'multi', deepgramKeyterms: '',
+        responseLanguage: 'English',
         settings: {
           basePrompt: DEFAULT_BASE_PROMPT,
           responseLanguage: 'English',
@@ -1928,6 +1934,55 @@ app.put('/api/auth/deepgram-keyterms', authMiddleware, requireOwnUser, async (re
     res.status(500).json({
       success: false,
       message: 'Failed to update Deepgram keyterms: ' + error.message
+    });
+  }
+});
+
+// Update Response Language
+app.put('/api/auth/response-language', authMiddleware, requireOwnUser, async (req, res) => {
+  try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
+    const { userId, responseLanguage } = req.body;
+
+    if (!userId || !responseLanguage) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and responseLanguage are required'
+      });
+    }
+
+    console.log('🔄 Updating response language for user:', userId);
+    console.log('🌐 Response Language:', responseLanguage);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { 
+        responseLanguage: responseLanguage,
+        'settings.responseLanguage': responseLanguage
+      } }
+    );
+
+    console.log('✅ Response language update result:', result.matchedCount, 'matched,', result.modifiedCount, 'modified');
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Response language updated successfully',
+      responseLanguage: responseLanguage
+    });
+  } catch (error) {
+    console.error('Update response language error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update response language: ' + error.message
     });
   }
 });

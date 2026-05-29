@@ -3517,11 +3517,11 @@ ${companyInfoSummary}`;
                       if (userStr) {
                         const user = JSON.parse(userStr);
                         
-                        const response = await apiClient('/auth/settings', {
+                        const response = await apiClient('/auth/response-language', {
                           method: 'PUT',
                           body: JSON.stringify({ 
                             userId: user._id,
-                            settings: { ...user.settings, responseLanguage: lang }
+                            responseLanguage: lang
                           })
                         });
                         

@@ -30,6 +30,7 @@ const AppRouterContent: React.FC = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('Failed to start new session. Please try again.');
   const [sessionKey, setSessionKey] = useState(0);
   const [showSetupLoader, setShowSetupLoader] = useState(false);
   const [setupCountdown, setSetupCountdown] = useState(8);
@@ -273,6 +274,8 @@ const AppRouterContent: React.FC = () => {
     setShowConfirmModal(false);
     try {
       const result = await messagesClient.clearHistory(currentUser._id);
+
+      // Reset settings (best-effort, don't block on failure)
       const resetSettings = {
         ...(currentUser.settings || {}),
         jobDescription: '',
@@ -288,14 +291,20 @@ const AppRouterContent: React.FC = () => {
         apiKeys: currentUser.settings?.apiKeys || {}
       };
 
-      await authClient.updateSettings(currentUser._id, resetSettings);
+      try {
+        await authClient.updateSettings(currentUser._id, resetSettings);
+      } catch (e) {
+        console.warn('⚠️ Failed to reset settings on server:', e);
+      }
 
       try {
         await apiClient('/auth/deepgram-keyterms', {
           method: 'PUT',
           body: JSON.stringify({ userId: currentUser._id, deepgramKeyterms: '' })
         });
-      } catch (e) {}
+      } catch (e) {
+        console.warn('⚠️ Failed to clear keyterms on server:', e);
+      }
 
       const updatedUser = { ...currentUser, deepgramKeyterms: '', settings: { ...currentUser.settings, ...resetSettings } };
       setCurrentUser(updatedUser);
@@ -309,7 +318,9 @@ const AppRouterContent: React.FC = () => {
         setShowSuccessModal(false);
         setSessionKey(prev => prev + 1);
       }, 1500);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ New Session error:', error);
+      setErrorMessage(error?.message || 'Failed to start new session. Please try again.');
       setShowErrorModal(true);
     }
   };
@@ -447,7 +458,7 @@ const AppRouterContent: React.FC = () => {
             <div className="text-center mb-6">
               <div className="text-5xl mb-4">❌</div>
               <h3 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-2">Error</h3>
-              <p className="text-slate-700 dark:text-slate-200 text-sm">Failed to start new session. Please try again.</p>
+              <p className="text-slate-700 dark:text-slate-200 text-sm">{errorMessage}</p>
             </div>
             <button onClick={() => setShowErrorModal(false)} className="w-full px-6 py-3 bg-red-600 dark:bg-red-600/80 hover:bg-red-700 dark:hover:bg-red-600 backdrop-blur-sm text-white rounded-lg font-bold transition-all">Close</button>
           </div>

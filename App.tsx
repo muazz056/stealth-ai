@@ -519,9 +519,11 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         const s = freshUser.settings || {};
 
         // Update state with freshest settings
+        // Prefer top-level responseLanguage field, fall back to settings.responseLanguage
+        const freshResponseLanguage = freshUser.responseLanguage || s.responseLanguage || '';
         setSettings({
           basePrompt: s.basePrompt || '',
-          responseLanguage: s.responseLanguage || '',
+          responseLanguage: freshResponseLanguage,
           basePromptSummary: s.basePromptSummary || '',
           jobDescription: s.jobDescription || '',
           jobDescriptionSummary: s.jobDescriptionSummary || '',
@@ -572,9 +574,10 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       if (latest?.success && latest.user) {
         const freshUser = latest.user;
         const s = freshUser.settings || {};
+        const freshResponseLanguage = freshUser.responseLanguage || s.responseLanguage || '';
         setSettings({
           basePrompt: s.basePrompt || '',
-          responseLanguage: s.responseLanguage || '',
+          responseLanguage: freshResponseLanguage,
           basePromptSummary: s.basePromptSummary || '',
           jobDescription: s.jobDescription || '',
           jobDescriptionSummary: s.jobDescriptionSummary || '',
@@ -2602,12 +2605,13 @@ Respond in ${langDisplay}.]`;
               onBlur={async (val) => {
                 if (!val || !val.trim()) return;
                 try {
-                  const res = await apiClient('/auth/settings', {
+                  const res = await apiClient('/auth/response-language', {
                     method: 'PUT',
-                    body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: val } })
+                    body: JSON.stringify({ userId: user._id, responseLanguage: val })
                   });
                   if (res.ok) {
-                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: val } };
+                    setSettings(prev => ({ ...prev, responseLanguage: val }));
+                    const updatedUser = { ...user, responseLanguage: val, settings: { ...user.settings, responseLanguage: val } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', val);
                     if (typeof window !== 'undefined' && (window as any).require) {
@@ -2672,20 +2676,20 @@ Respond in ${langDisplay}.]`;
                     console.error('❌ Failed to save transcription language:', langResult);
                   }
 
-                  // Save response language
+                  // Save response language (standalone field)
                   totalCount++;
-                  const settingsRes = await apiClient('/auth/settings', {
+                  const langRespRes = await apiClient('/auth/response-language', {
                     method: 'PUT',
-                    body: JSON.stringify({ userId: user._id, settings: { ...settings, responseLanguage: settings.responseLanguage } })
+                    body: JSON.stringify({ userId: user._id, responseLanguage: settings.responseLanguage })
                   });
-                  const settingsResult = await settingsRes.json();
-                  if (settingsResult.success) {
+                  if (langRespRes.ok) {
                     savedCount++;
-                    const updatedUser = { ...user, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
+                    const updatedUser = { ...user, responseLanguage: settings.responseLanguage, settings: { ...user.settings, responseLanguage: settings.responseLanguage } };
                     localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
                     localStorage.setItem('isa_response_language', settings.responseLanguage);
                   } else {
-                    console.error('❌ Failed to save response language:', settingsResult);
+                    const langRespErr = await langRespRes.json().catch(() => ({}));
+                    console.error('❌ Failed to save response language:', langRespErr);
                   }
 
                   // Save keywords
