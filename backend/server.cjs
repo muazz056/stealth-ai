@@ -1607,6 +1607,9 @@ app.post('/api/cv/parse', upload.single('cv'), async (req, res) => {
 // Update Settings
 app.put('/api/auth/settings', authMiddleware, requireOwnUser, async (req, res) => {
   try {
+    const database = await connectDB();
+    const users = database.collection('users');
+    
     const { userId, settings } = req.body;
 
     if (!userId || !settings) {
@@ -2690,7 +2693,8 @@ app.post('/api/summarize', async (req, res) => {
       hasApiKey: !!req.body.apiKey
     });
     
-    let { type, text, apiProvider, apiKey } = req.body;
+    let { type, text, apiProvider, apiKey, model: reqModel } = req.body;
+    let model = reqModel;
     
     if (!type || !text || !apiProvider) {
       return res.status(400).json({
@@ -2712,11 +2716,13 @@ app.post('/api/summarize', async (req, res) => {
           }
           if (entry) {
             apiKey = entry.apiKey;
+            if (!model) model = entry.model;
             if (entry.provider !== apiProvider) {
               console.log(`🔐 Switching provider ${apiProvider} → ${entry.provider} (summarize, from system chain)`);
             }
             apiProvider = entry.provider;
             console.log(`🔐 Using system AI chain key for ${apiProvider} (summarize)`);
+            if (model) console.log(`🔐 Using model: ${model}`);
           }
         }
       } catch (chainErr) {
@@ -2803,7 +2809,7 @@ ${text}`;
       }
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2841,7 +2847,7 @@ ${text}`;
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: model || 'gpt-4o-mini',
             messages: [
               { role: 'system', content: 'You are a professional resume and job description summarizer.' },
               { role: 'user', content: summaryPrompt }
@@ -2876,7 +2882,7 @@ ${text}`;
             'anthropic-version': '2023-06-01'
           },
           body: JSON.stringify({
-            model: 'claude-3-5-sonnet-20241022',
+            model: model || 'claude-3-5-sonnet-20241022',
             max_tokens: 300,
             messages: [
               { role: 'user', content: summaryPrompt }
@@ -2910,7 +2916,7 @@ ${text}`;
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            model: model || 'meta-llama/llama-4-scout-17b-16e-instruct',
             messages: [
               { role: 'system', content: 'You are a professional meeting assistant.' },
               { role: 'user', content: summaryPrompt }
