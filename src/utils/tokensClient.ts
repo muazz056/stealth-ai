@@ -10,6 +10,8 @@ export const tokensClient = {
     hasUnlimitedTokens: boolean;
     role: string;
     plan: string;
+    transcriptionLimit?: number;
+    transcriptionSeconds?: number;
     message?: string;
   }> {
     try {
@@ -57,7 +59,7 @@ export const tokensClient = {
         canListen: false,
         reason: 'error',
         transcriptionSeconds: 0,
-        transcriptionLimit: 1500,
+        transcriptionLimit: 1500, // Default, will be overridden by backend response
         transcriptionRemaining: 0,
         tokens: 0,
         isAdmin: false,

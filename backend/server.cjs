@@ -68,6 +68,21 @@ function requireOwnUser(req, res, next) {
   next();
 }
 
+// Tier limits: returns { tokens, transcriptionSeconds } for a given plan
+function getTierLimits(plan) {
+  switch ((plan || '').toLowerCase()) {
+    case 'pro':
+      return { tokens: 200, transcriptionSeconds: 5400 }; // 90 min
+    case 'premium':
+      return { tokens: 500, transcriptionSeconds: 10800 }; // 180 min
+    case 'lifetime':
+      return { tokens: -1, transcriptionSeconds: -1 }; // unlimited
+    case 'free':
+    default:
+      return { tokens: 10, transcriptionSeconds: 1500 }; // 25 min
+  }
+}
+
 // Rate limiters
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -759,6 +774,7 @@ OUTPUT:
       email,
       password: hashedPassword,
       verified: false,
+      suspended: false,
       emailVerificationToken: verificationToken,
       emailVerificationExpiry: tokenExpiry,
       role: 'user', // Default role: regular user
@@ -857,6 +873,14 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid username or password'
+      });
+    }
+
+    // Block login if account is suspended
+    if (user.suspended) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Please contact support.'
       });
     }
 
@@ -1185,6 +1209,13 @@ app.post('/api/auth/google', async (req, res) => {
     let user = await users.findOne({ email });
 
     if (user) {
+      // Block login if account is suspended
+      if (user.suspended) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been suspended. Please contact support.'
+        });
+      }
       // Update googleId + picture if not set, and ensure verified
       const updates = { picture, name };
       if (!user.googleId) updates.googleId = googleId;
@@ -1207,6 +1238,7 @@ app.post('/api/auth/google', async (req, res) => {
         googleId,
         picture,
         verified: true,
+        suspended: false,
         emailVerificationToken: null,
         emailVerificationExpiry: null,
         role: 'user',
@@ -1412,6 +1444,11 @@ app.get('/api/auth/google/callback', async (req, res) => {
     let user = await users.findOne({ email });
 
     if (user) {
+      // Block login if account is suspended
+      if (user.suspended) {
+        if (state) googleAuthResults.set(state, { status: 'error', message: 'Your account has been suspended. Please contact support.', ts: Date.now() });
+        return res.send(successPage(false, 'Your account has been suspended. Please contact support.'));
+      }
       const updates = { picture, name };
       if (!user.googleId) updates.googleId = googleId;
       if (!user.verified) updates.verified = true;
@@ -1425,6 +1462,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
         password: '',
         googleId, picture,
         verified: true,
+        suspended: false,
         emailVerificationToken: null,
         emailVerificationExpiry: null,
         role: 'user', plan: 'Free',
@@ -2096,25 +2134,203 @@ app.get('/api/auth/super-admin/deepgram-chain', async (req, res) => {
   }
 });
 
-// List all users (super admin only)
+// List all users (super admin only) - with search and pagination
 app.get('/api/auth/super-admin/users', async (req, res) => {
   try {
     const database = await connectDB();
-    const { userId } = req.query;
+    const { userId, search = '', page = 1, limit = 20 } = req.query;
     if (!userId) {
       return res.status(400).json({ success: false, message: 'userId required' });
     }
     await verifySuperAdmin(database, userId);
     const users = database.collection('users');
-    const allUsers = await users.find({}, {
-      projection: { password: 0 }
-    }).sort({ createdAt: -1 }).toArray();
-    res.json({ success: true, users: allUsers });
+
+    const query = {};
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { name: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [allUsers, totalCount] = await Promise.all([
+      users.find(query, { projection: { password: 0 } })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+      users.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      users: allUsers,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limitNum)
+      }
+    });
   } catch (err) {
     if (err.message.includes('Unauthorized')) {
       return res.status(403).json({ success: false, message: err.message });
     }
     console.error('List users error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Delete user permanently (super admin only)
+app.delete('/api/auth/super-admin/users/:targetUserId', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    const { targetUserId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const users = database.collection('users');
+
+    if (!ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
+
+    const targetUser = await users.findOne({ _id: new ObjectId(targetUserId) });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Prevent deleting other super admins
+    if (targetUser.role === 'super-admin') {
+      return res.status(403).json({ success: false, message: 'Cannot delete super admin accounts' });
+    }
+
+    await users.deleteOne({ _id: new ObjectId(targetUserId) });
+
+    // Also delete user's messages
+    const messages = database.collection('messages');
+    await messages.deleteMany({ userId: new ObjectId(targetUserId) });
+
+    res.json({ success: true, message: 'User deleted permanently' });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Delete user error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Suspend or unsuspend user (super admin only)
+app.put('/api/auth/super-admin/users/:targetUserId/suspend', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    const { targetUserId } = req.params;
+    const { suspended } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const users = database.collection('users');
+
+    if (!ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
+
+    const targetUser = await users.findOne({ _id: new ObjectId(targetUserId) });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Prevent suspending other super admins
+    if (targetUser.role === 'super-admin') {
+      return res.status(403).json({ success: false, message: 'Cannot suspend super admin accounts' });
+    }
+
+    await users.updateOne(
+      { _id: new ObjectId(targetUserId) },
+      { $set: { suspended: !!suspended } }
+    );
+
+    res.json({
+      success: true,
+      message: suspended ? 'User suspended' : 'User unsuspended',
+      suspended: !!suspended
+    });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Suspend user error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Change user role and set corresponding limits (super admin only)
+app.put('/api/auth/super-admin/users/:targetUserId/role', async (req, res) => {
+  try {
+    const database = await connectDB();
+    const { userId } = req.query;
+    const { targetUserId } = req.params;
+    const { plan } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'userId required' });
+    }
+    await verifySuperAdmin(database, userId);
+    const users = database.collection('users');
+
+    if (!ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
+
+    const validPlans = ['Free', 'Pro', 'Premium'];
+    if (!validPlans.includes(plan)) {
+      return res.status(400).json({ success: false, message: 'Invalid plan. Must be: Free, Pro, or Premium' });
+    }
+
+    const targetUser = await users.findOne({ _id: new ObjectId(targetUserId) });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Prevent changing other super admins
+    if (targetUser.role === 'super-admin') {
+      return res.status(403).json({ success: false, message: 'Cannot change super admin plan' });
+    }
+
+    const tierLimits = getTierLimits(plan);
+
+    await users.updateOne(
+      { _id: new ObjectId(targetUserId) },
+      {
+        $set: {
+          plan: plan,
+          tokens: tierLimits.tokens,
+          transcriptionSeconds: 0 // Reset transcription usage on plan change
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `User plan changed to ${plan}`,
+      plan,
+      tokens: tierLimits.tokens,
+      transcriptionLimit: tierLimits.transcriptionSeconds
+    });
+  } catch (err) {
+    if (err.message.includes('Unauthorized')) {
+      return res.status(403).json({ success: false, message: err.message });
+    }
+    console.error('Change role error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -2324,6 +2540,7 @@ app.get('/api/tokens/check/:userId', async (req, res) => {
     const isAdmin = user.role === 'admin' || user.role === 'super-admin';
     const hasUnlimitedTokens = isAdmin || user.tokens === -1;
     const canSendMessage = hasUnlimitedTokens || user.tokens > 0;
+    const tierLimits = getTierLimits(user.plan);
 
     res.json({
       success: true,
@@ -2332,7 +2549,9 @@ app.get('/api/tokens/check/:userId', async (req, res) => {
       isAdmin,
       hasUnlimitedTokens,
       role: user.role,
-      plan: user.plan
+      plan: user.plan,
+      transcriptionLimit: tierLimits.transcriptionSeconds,
+      transcriptionSeconds: user.transcriptionSeconds || 0
     });
   } catch (error) {
     console.error('Check tokens error:', error);
@@ -2437,7 +2656,8 @@ app.get('/api/tokens/check-listen/:userId', async (req, res) => {
 
     const isAdmin = user.role === 'admin' || user.role === 'super-admin';
     const hasUnlimitedTokens = isAdmin || user.tokens === -1;
-    const transcriptionLimit = 1500;
+    const tierLimits = getTierLimits(user.plan);
+    const transcriptionLimit = tierLimits.transcriptionSeconds;
     const transcriptionSeconds = user.transcriptionSeconds || 0;
     const transcriptionRemaining = Math.max(0, transcriptionLimit - transcriptionSeconds);
     const hasTranscriptionTime = isAdmin || hasUnlimitedTokens || transcriptionRemaining > 0;
@@ -2515,10 +2735,11 @@ app.post('/api/tokens/add-transcription-time/:userId', async (req, res) => {
     const isAdmin = user.role === 'admin' || user.role === 'super-admin';
     const hasUnlimitedTokens = isAdmin || user.tokens === -1;
     if (hasUnlimitedTokens) {
+      const tierLimits = getTierLimits(user.plan);
       return res.json({
         success: true,
         transcriptionSeconds: user.transcriptionSeconds || 0,
-        transcriptionRemaining: 1500,
+        transcriptionRemaining: tierLimits.transcriptionSeconds,
         limitReached: false,
         unlimited: true
       });
@@ -2530,7 +2751,8 @@ app.post('/api/tokens/add-transcription-time/:userId', async (req, res) => {
       { $inc: { transcriptionSeconds: seconds } }
     );
 
-    const transcriptionLimit = 1500;
+    const tierLimits = getTierLimits(user.plan);
+    const transcriptionLimit = tierLimits.transcriptionSeconds;
     const newTotal = (user.transcriptionSeconds || 0) + seconds;
     const transcriptionRemaining = Math.max(0, transcriptionLimit - newTotal);
     const limitReached = transcriptionRemaining <= 0;

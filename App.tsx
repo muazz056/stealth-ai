@@ -18,7 +18,7 @@ import { messagesClient } from './src/utils/messagesClient';
 import { tokensClient } from './src/utils/tokensClient';
 import { resolveDeepgramConfig } from './src/utils/deepgramChainClient';
 import { apiClient } from './src/utils/apiClient';
-import { APP_CONFIG } from './src/config';
+import { APP_CONFIG, getTierLimits } from './src/config';
 import { 
   getDefaultShortcuts, 
   ShortcutsState, 
@@ -337,7 +337,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       if (saved) {
         const u = JSON.parse(saved);
         const trSecs = u.transcriptionSeconds || 0;
-        setTranscriptionSecondsRemaining(Math.max(0, 1500 - trSecs));
+        const limits = getTierLimits(u.plan);
+        setTranscriptionSecondsRemaining(Math.max(0, limits.transcriptionSeconds - trSecs));
       }
     } catch {}
   }, []);
@@ -1202,7 +1203,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const startListenRef = useRef<(() => void) | null>(null);
   const stopListenRef = useRef<(() => void) | null>(null);
   const transcriptionStartTimeRef = useRef<number>(0);
-  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500);
+  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500); // Default, will be updated dynamically
 
   useEffect(() => {
     try {

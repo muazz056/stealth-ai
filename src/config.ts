@@ -17,6 +17,18 @@ export const ENV = {
   IS_PROD: import.meta.env.PROD,
 };
 
+// Tier limits: credits and transcription seconds per plan
+export const TIER_LIMITS: Record<string, { tokens: number; transcriptionSeconds: number }> = {
+  Free: { tokens: 10, transcriptionSeconds: 1500 },      // 25 min
+  Pro: { tokens: 200, transcriptionSeconds: 5400 },       // 90 min
+  Premium: { tokens: 500, transcriptionSeconds: 10800 },  // 180 min
+  lifetime: { tokens: -1, transcriptionSeconds: -1 },     // unlimited
+};
+
+export function getTierLimits(plan?: string): { tokens: number; transcriptionSeconds: number } {
+  return TIER_LIMITS[plan || 'Free'] || TIER_LIMITS.Free;
+}
+
 // AI Providers Configuration
 export const AI_PROVIDERS = {
   GEMINI: {

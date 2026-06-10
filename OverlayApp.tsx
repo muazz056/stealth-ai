@@ -13,6 +13,7 @@ import { tokensClient } from './src/utils/tokensClient';
 import { apiClient } from './src/utils/apiClient';
 import { resolveDeepgramConfig, shouldUseDeepgram } from './src/utils/deepgramChainClient';
 import { getDefaultShortcuts, ShortcutConfig, ShortcutAction } from './src/utils/shortcutsManager';
+import { getTierLimits } from './src/config';
 import StealthModal from './components/StealthModal';
 import SearchableLanguageSelect from './components/SearchableLanguageSelect';
 
@@ -225,7 +226,7 @@ const OverlayApp: React.FC = () => {
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
   const transcriptionStartTimeRef = useRef<number>(0);
-  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500);
+  const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500); // Default, will be updated dynamically
   
   // Track which providers have received context (persists per user)
   const [providersSentContext, setProvidersSentContext] = useState<Set<string>>(() => {
@@ -709,7 +710,8 @@ const OverlayApp: React.FC = () => {
         setOverlayUserSettings(s);
         // Initialize transcription remaining
         const trSeconds = freshUser.transcriptionSeconds || 0;
-        setTranscriptionSecondsRemaining(Math.max(0, 1500 - trSeconds));
+        const limits = getTierLimits(freshUser.plan);
+        setTranscriptionSecondsRemaining(Math.max(0, limits.transcriptionSeconds - trSeconds));
         if (freshUser.deepgramLanguage) setCurrentLanguage(freshUser.deepgramLanguage);
         if (freshUser.deepgramKeyterms !== undefined) setCurrentKeyterms(freshUser.deepgramKeyterms);
         if (s.cvSummary) localStorage.setItem('isa_cv_summary', s.cvSummary);

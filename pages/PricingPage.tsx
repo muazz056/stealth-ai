@@ -136,6 +136,7 @@ const PricingPage: React.FC<PricingPageProps> = ({ user }) => {
             description="Perfect for testing the waters"
             features={[
               '10 free credits on signup',
+              '25 min transcription limit',
               'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
@@ -154,7 +155,8 @@ const PricingPage: React.FC<PricingPageProps> = ({ user }) => {
             originalPrice={isAnnual ? '$348/yr' : undefined}
             description="For serious meeting preparation"
             features={[
-              'Unlimited credits',
+              '200 credits per month',
+              '90 min transcription limit',
               'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
@@ -176,7 +178,8 @@ const PricingPage: React.FC<PricingPageProps> = ({ user }) => {
             originalPrice={isAnnual ? '$588/yr' : undefined}
             description="Maximum advantage with priority AI"
             features={[
-              'Unlimited credits',
+              '500 credits per month',
+              '180 min transcription limit',
               'Fastest AI Providers',
               'Real-time voice transcription',
               'Screen analysis',
@@ -201,7 +204,7 @@ const PricingPage: React.FC<PricingPageProps> = ({ user }) => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <FAQItem question="What counts as a credit?" answer="1 credit = 1 question. Each AI response you receive consumes one credit. New users get 10 free credits on signup." />
+            <FAQItem question="What counts as a credit?" answer="1 credit = 1 question. Each AI response you receive consumes one credit. Free users get 10 credits, Pro users get 200 credits, and Premium users get 500 credits." />
             <FAQItem question="Can I upgrade my plan?" answer="Yes! You can upgrade to Pro, Premium, or Lifetime at any time. Your credits will be upgraded immediately." />
             <FAQItem question="Which AI providers are supported?" answer="We support Google Gemini, OpenAI GPT, Claude, and Groq. You'll need your own API keys." />
             <FAQItem question="Is there a refund policy?" answer="Yes! We offer a 30-day money-back guarantee for all paid plans. No questions asked." />
