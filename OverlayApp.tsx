@@ -2305,11 +2305,13 @@ Respond in ${langDisplay}.]`
 
       // Use streaming endpoint
       console.log('📡 Overlay: Starting streaming response...');
+      const userForStream = (() => { try { return JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); } catch { return {}; } })();
       const response = await fetch(`${API_BASE_URL}/api/generate-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: apiMessages
+          messages: apiMessages,
+          ...(userForStream?.role === 'admin' && userForStream._id ? { userId: userForStream._id } : {})
         }),
         signal: controller.signal
       });

@@ -330,6 +330,14 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
+  // Admin custom API config state
+  const [adminProvider, setAdminProvider] = useState(user?.selectedProvider || '');
+  const [adminModel, setAdminModel] = useState(user?.selectedModel || '');
+  const [adminApiKey, setAdminApiKey] = useState(user?.apiKeys?.[user?.selectedProvider || ''] || '');
+  const [showAdminApiKey, setShowAdminApiKey] = useState(false);
+  const [adminApiSaved, setAdminApiSaved] = useState(false);
+  const [adminApiError, setAdminApiError] = useState('');
+
   // Initialize transcription time remaining from user data
   useEffect(() => {
     try {
@@ -2285,7 +2293,8 @@ Respond in ${langDisplay}.]`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: apiMessages
+          messages: apiMessages,
+          ...(user?.role === 'admin' ? { userId: user._id } : {})
         }),
         signal: controller.signal
       });
@@ -2746,6 +2755,125 @@ Respond in ${langDisplay}.]`;
             )}
           </div>
         </div>
+
+        {/* Admin API Configuration (only for admin users) */}
+        {user?.role === 'admin' && (
+          <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">⚙️ API Integration</h2>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
+                  Provider
+                </label>
+                <select
+                  value={adminProvider}
+                  onChange={(e) => {
+                    setAdminProvider(e.target.value);
+                    const existingKey = user?.apiKeys?.[e.target.value];
+                    if (existingKey) setAdminApiKey(existingKey);
+                    else setAdminApiKey('');
+                  }}
+                  className="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all"
+                >
+                  <option value="">Select Provider</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="groq">Groq</option>
+                  <option value="grok">Grok</option>
+                  <option value="claude">Claude</option>
+                  <option value="cerebras">Cerebras</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="openai-compatible">OpenAI Compatible</option>
+                </select>
+              </div>
+
+              {adminProvider && (
+                <>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
+                      Model Name
+                    </label>
+                    <input
+                      type="text"
+                      value={adminModel}
+                      onChange={(e) => setAdminModel(e.target.value)}
+                      placeholder="e.g., gpt-4, gemini-1.5-pro, claude-3-5-sonnet"
+                      className="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-400 uppercase mb-2">
+                      API Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showAdminApiKey ? 'text' : 'password'}
+                        value={adminApiKey}
+                        onChange={(e) => setAdminApiKey(e.target.value)}
+                        placeholder={user?.apiKeys?.[adminProvider] ? 'Key already set (enter to change)' : 'Enter your API key'}
+                        className="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-black dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminApiKey(!showAdminApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                      >
+                        {showAdminApiKey ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="flex flex-wrap gap-3 mt-6">
+                <button
+                  onClick={async () => {
+                    try {
+                      setAdminApiError('');
+                      await authClient.updateApiKey(user._id, adminProvider, adminApiKey, adminModel);
+                      const updatedUser = { ...user, selectedProvider: adminProvider, selectedModel: adminModel, apiKeys: { ...(user.apiKeys || {}), [adminProvider]: adminApiKey } };
+                      localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                      setAdminApiSaved(true);
+                      setTimeout(() => setAdminApiSaved(false), 3000);
+                    } catch (error: any) {
+                      setAdminApiError(error.message || 'Failed to save API config');
+                    }
+                  }}
+                  disabled={!adminProvider || !adminModel || !adminApiKey}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all shadow-md hover:shadow-lg"
+                >
+                  Save API Config
+                </button>
+              </div>
+
+              {adminApiSaved && (
+                <div className="mt-4 flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  ✓ Saved Successfully
+                </div>
+              )}
+
+              {adminApiError && (
+                <div className="mt-4 flex items-center gap-2.5 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-4 py-3 rounded-xl text-sm font-semibold">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  {adminApiError}
+                </div>
+              )}
+
+              <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">
+                Configure your own API provider, model, and key. This will be used instead of the system chain.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Section 2: Meeting Context (2-Column Layout) */}
         <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">

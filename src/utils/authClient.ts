@@ -47,10 +47,12 @@ export const authClient = {
     clearTokens();
   },
 
-  updateApiKey: async (userId: string, provider: string, apiKey: string) => {
+  updateApiKey: async (userId: string, provider: string, apiKey: string, model?: string) => {
+    const body: any = { userId, provider, apiKey };
+    if (model) body.model = model;
     const response = await apiClient('/auth/api-key', {
       method: 'PUT',
-      body: JSON.stringify({ userId, provider, apiKey }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Request failed' }));

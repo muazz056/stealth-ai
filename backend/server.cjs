@@ -610,6 +610,9 @@ async function ensureUserDefaults(userId, usersCollection) {
   if (!user.responseLanguage) {
     updates.responseLanguage = 'English';
   }
+  if (user.selectedModel === undefined) {
+    updates.selectedModel = '';
+  }
 
   if (Object.keys(updates).length > 0) {
     console.log('🔧 Migrating missing defaults for user:', userId);
@@ -781,6 +784,7 @@ OUTPUT:
       plan: 'Free', // Free plan for new users
       tokens: 10, // ONE-TIME: 10 free credits on signup
       transcriptionSeconds: 0, // ONE-TIME: 25 min (1500s) free transcription limit
+      selectedModel: '',
       createdAt: new Date(),
       apiKeys: {},
       selectedProvider: '', // No default provider - user must choose
@@ -1104,10 +1108,10 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-// Update API Key
+// Update API Key (with optional model for admin custom config)
 app.put('/api/auth/api-key', authMiddleware, requireOwnUser, async (req, res) => {
   try {
-    const { userId, provider, apiKey } = req.body;
+    const { userId, provider, apiKey, model } = req.body;
 
     if (!userId || !provider || !apiKey) {
       return res.status(400).json({
@@ -1119,15 +1123,20 @@ app.put('/api/auth/api-key', authMiddleware, requireOwnUser, async (req, res) =>
     console.log('🔐 Updating API key for user:', userId);
     console.log('📡 Provider:', provider);
     console.log('🔑 API Key (first 10 chars):', apiKey.substring(0, 10) + '...');
+    if (model) console.log('📡 Model:', model);
+
+    const database = await connectDB();
+    const users = database.collection('users');
+
+    const updateFields = {
+      [`apiKeys.${provider}`]: apiKey,
+      selectedProvider: provider
+    };
+    if (model) updateFields['selectedModel'] = model;
 
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      {
-        $set: {
-          [`apiKeys.${provider}`]: apiKey,
-          selectedProvider: provider
-        }
-      }
+      { $set: updateFields }
     );
 
     console.log('✅ MongoDB update result:', result);
@@ -1147,7 +1156,8 @@ app.put('/api/auth/api-key', authMiddleware, requireOwnUser, async (req, res) =>
     res.json({
       success: true,
       message: 'API key updated successfully',
-      apiKeys: updatedUser?.apiKeys || {}
+      apiKeys: updatedUser?.apiKeys || {},
+      selectedModel: updatedUser?.selectedModel || ''
     });
   } catch (error) {
     console.error('❌ Update API key error:', error);
@@ -1245,6 +1255,7 @@ app.post('/api/auth/google', async (req, res) => {
         plan: 'Free',
         tokens: 10,
         transcriptionSeconds: 0,
+        selectedModel: '',
         createdAt: new Date(),
         apiKeys: {},
         selectedProvider: '',
@@ -1468,6 +1479,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
         role: 'user', plan: 'Free',
         tokens: 10,
         transcriptionSeconds: 0,
+        selectedModel: '',
         createdAt: new Date(),
         apiKeys: {}, selectedProvider: '',
         voiceProvider: 'default', deepgramApiKey: '',
@@ -3201,7 +3213,7 @@ app.post('/api/generate-stream', async (req, res) => {
   res.flushHeaders();
 
   try {
-    let { messages, apiKey: reqApiKey, model: reqModel } = req.body;
+    let { messages, apiKey: reqApiKey, model: reqModel, userId } = req.body;
 
     if (!messages) {
       console.log('❌ Missing required fields');
@@ -3214,30 +3226,75 @@ app.post('/api/generate-stream', async (req, res) => {
     let apiKey = reqApiKey;
     let model = reqModel;
 
-    // Always check the system AI chain (super admin configured) for the API key
-    try {
-      const database = await connectDB();
-      const config = database.collection('app_config');
-      const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
-      if (chainDoc?.chain) {
-        // Try to match the requested provider first
-        let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
-        if (!entry) {
-          // Fall back to first active entry in the chain
-          entry = chainDoc.chain.find(e => e.active !== false);
-        }
-        if (entry) {
-          if (!apiKey) apiKey = entry.apiKey;
-          if (!model) model = entry.model;
-          if (entry.provider !== apiProvider) {
-            console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
+    // Check if user is an admin — admins must use their own API config
+    if (userId && ObjectId.isValid(userId)) {
+      try {
+        const database = await connectDB();
+        const user = await database.collection('users').findOne({ _id: new ObjectId(userId) });
+        if (user && user.role === 'admin') {
+          if (user.selectedProvider && user.selectedModel && user.apiKeys?.[user.selectedProvider]) {
+            apiProvider = user.selectedProvider;
+            apiKey = user.apiKeys[user.selectedProvider];
+            model = user.selectedModel;
+            console.log(`🔐 Using admin's own API config: ${apiProvider} / ${model}`);
+          } else {
+            console.log('❌ Admin missing own API config');
+            res.write(`data: ${JSON.stringify({ error: 'Admin must configure own API provider, model, and API key in settings.' })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            return res.end();
           }
-          apiProvider = entry.provider;
-          console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
+        } else {
+          // Non-admin: fall back to system AI chain
+          try {
+            const database = await connectDB();
+            const config = database.collection('app_config');
+            const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+            if (chainDoc?.chain) {
+              let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
+              if (!entry) {
+                entry = chainDoc.chain.find(e => e.active !== false);
+              }
+              if (entry) {
+                if (!apiKey) apiKey = entry.apiKey;
+                if (!model) model = entry.model;
+                if (entry.provider !== apiProvider) {
+                  console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
+                }
+                apiProvider = entry.provider;
+                console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
+              }
+            }
+          } catch (chainErr) {
+            console.error('Failed to read system AI chain:', chainErr.message);
+          }
         }
+      } catch (userErr) {
+        console.error('Failed to look up user:', userErr.message);
       }
-    } catch (chainErr) {
-      console.error('Failed to read system AI chain:', chainErr.message);
+    } else {
+      // No userId provided: fall back to system AI chain
+      try {
+        const database = await connectDB();
+        const config = database.collection('app_config');
+        const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+        if (chainDoc?.chain) {
+          let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
+          if (!entry) {
+            entry = chainDoc.chain.find(e => e.active !== false);
+          }
+          if (entry) {
+            if (!apiKey) apiKey = entry.apiKey;
+            if (!model) model = entry.model;
+            if (entry.provider !== apiProvider) {
+              console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
+            }
+            apiProvider = entry.provider;
+            console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
+          }
+        }
+      } catch (chainErr) {
+        console.error('Failed to read system AI chain:', chainErr.message);
+      }
     }
 
     if (!apiKey) {
