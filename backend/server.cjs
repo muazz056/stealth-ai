@@ -3768,12 +3768,14 @@ app.post('/api/analyze-screen', async (req, res) => {
       return res.status(400).json({ error: `No API key configured for ${apiProvider || 'unknown'}` });
     }
 
-    // Build messages with image and call the appropriate provider
+    // Use only the last 4 history messages for follow-up context
+    const recentMessages = (messages || []).slice(-4);
+
     let text = '';
 
     if (apiProvider === 'gemini') {
-      const contents = (messages || []).map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : msg.role,
+      const contents = recentMessages.map((msg) => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content || msg.parts?.[0]?.text || '' }]
       }));
       contents.push({
@@ -3798,8 +3800,8 @@ app.post('/api/analyze-screen', async (req, res) => {
       text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     } else if (apiProvider === 'openai') {
-      const msgs = (messages || []).map((msg) => ({
-        role: msg.role === 'model' ? 'assistant' : msg.role,
+      const msgs = recentMessages.map((msg) => ({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
         content: msg.content || msg.parts?.[0]?.text || ''
       }));
       msgs.push({
@@ -3821,8 +3823,8 @@ app.post('/api/analyze-screen', async (req, res) => {
       text = data.choices?.[0]?.message?.content || '';
 
     } else if (apiProvider === 'claude') {
-      const msgs = (messages || []).map((msg) => ({
-        role: msg.role === 'model' ? 'assistant' : msg.role,
+      const msgs = recentMessages.map((msg) => ({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
         content: msg.content || msg.parts?.[0]?.text || ''
       }));
       msgs.push({
@@ -3844,8 +3846,8 @@ app.post('/api/analyze-screen', async (req, res) => {
       text = data.content?.[0]?.text || '';
 
     } else if (apiProvider === 'groq') {
-      const msgs = (messages || []).map((msg) => ({
-        role: msg.role === 'model' ? 'assistant' : msg.role,
+      const msgs = recentMessages.map((msg) => ({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
         content: msg.content || msg.parts?.[0]?.text || ''
       }));
       msgs.push({

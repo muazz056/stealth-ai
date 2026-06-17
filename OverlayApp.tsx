@@ -184,6 +184,7 @@ const LS_CHAT_HISTORY_KEY = 'isa_chat_history';
 const LS_USER_KEY = 'isa_current_user';
 const LS_API_KEYS = 'isa_api_keys';
 const LS_API_PROVIDER = 'isa_api_provider';
+const LS_ANALYZED_QUESTIONS_KEY = 'isa_analyzed_questions';
 const QUERY_BACKEND_URL = typeof window !== 'undefined'
   ? new URLSearchParams(window.location.search).get('backendUrl')
   : null;
@@ -275,6 +276,10 @@ const OverlayApp: React.FC = () => {
   const [currentLanguage, setCurrentLanguage] = useState<string>('multi');
   const [currentKeyterms, setCurrentKeyterms] = useState<string>('');
   const [overlayUserSettings, setOverlayUserSettings] = useState<any>({});
+  const [analyzedQuestions, setAnalyzedQuestions] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(LS_ANALYZED_QUESTIONS_KEY) || '[]'); }
+    catch { return []; }
+  });
   
   // Browser mode state
   const [browserMode, setBrowserMode] = useState(false);
@@ -818,6 +823,8 @@ const OverlayApp: React.FC = () => {
           // Clear chat history
           localStorage.removeItem(LS_CHAT_HISTORY_KEY);
           setChatHistory([]);
+          localStorage.removeItem(LS_ANALYZED_QUESTIONS_KEY);
+          setAnalyzedQuestions([]);
           
           // Clear Q&A state
           setManualTextInput('');
@@ -1406,6 +1413,12 @@ const OverlayApp: React.FC = () => {
   useEffect(() => {
     manualTextInputRef.current = manualTextInput;
   }, [manualTextInput]);
+
+  // Persist analyzed questions
+  useEffect(() => {
+    try { localStorage.setItem(LS_ANALYZED_QUESTIONS_KEY, JSON.stringify(analyzedQuestions)); }
+    catch {}
+  }, [analyzedQuestions]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -2524,22 +2537,44 @@ Respond in ${langDisplay}.]`
           : null;
 
         const responseLanguage = overlayUserSettings?.responseLanguage || 'English';
-        let contextPrompt = `${savedBasePrompt.replace(/\{LANGUAGE\}/g, responseLanguage)} Respond in ${responseLanguage} Language. You will be given a screenshot containing one or more questions. Carefully analyze the image and provide accurate, clear, and to-the-point answers.`;
+        let contextPrompt = `You are a precise screen analyzer for a live interview.
 
-        contextPrompt += `\n\nIMPORTANT: First identify the exact question(s) from the screenshot, then answer them. Use this format:
-QUESTION: [the exact question text from the screenshot]
+TASK:
+1. Look at the screenshot below and extract ALL questions visible on screen
+2. List them in order from top to bottom as they appear
+3. The following questions in this list have ALREADY been answered in previous rounds — SKIP them:
+${analyzedQuestions.length > 0 ? analyzedQuestions.map((q, i) => `   ${i + 1}. "${q}"`).join('\n') : '   (none yet)'}
+4. Pick the FIRST (topmost) question in your list that does NOT appear in the already-answered list — do NOT pick the bottom or most recent one
+5. Answer that question
+
+OUTPUT FORMAT (use EXACTLY this):
+ALL_QUESTIONS: [comma-separated list of every question visible in the screenshot, top to bottom]
+QUESTION: [the next unanswered question]
 ANSWER: [your detailed answer]
 
-If there are multiple questions, repeat this format for each one.`;
-        
-        if (savedResume) contextPrompt += `\n\nCandidate Resume Context:\n${savedResume}`;
-        if (savedJD) contextPrompt += `\n\nJob Description Context:\n${savedJD}`;
-        if (savedCompanyInfo) contextPrompt += `\n\nCompany Context:\n${savedCompanyInfo}`;
+Prior Q&A context (for follow-up reference only):
+${
+  chatHistory && chatHistory.length > 0
+    ? chatHistory.slice(-4).map(m => {
+        const role = m.role === 'user' ? 'User' : 'Assistant';
+        const text = m.content || m.parts?.[0]?.text || '';
+        return `${role}: ${text}`;
+      }).join('\n')
+    : '(none)'
+}
 
-        // Add user's specific question if provided
-        if (userMessage) {
-          contextPrompt += `\n\nUser's Specific Question: "${userMessage}"`;
-        }
+${savedResume ? `\nCandidate Resume Context:\n${savedResume}` : ''}
+${savedJD ? `\nJob Description Context:\n${savedJD}` : ''}
+${savedCompanyInfo ? `\nCompany Context:\n${savedCompanyInfo}` : ''}
+${userMessage ? `\nUser's Specific Question (use as clue to find the right question in the screenshot): "${userMessage}"` : ''}
+
+IMPORTANT RULES:
+- The SCREENSHOT is the PRIMARY source — extract all questions from it
+- Prior Q&A context above is ONLY for follow-up understanding, NOT for re-answering old questions
+- ALL_QUESTIONS must include EVERY question visible, not just the one you're answering
+- When checking if a question is already answered, compare EXACT wording — if even slightly different or reworded, treat it as NEW and answer it
+- If ALL questions have already been answered word-for-word, return "ALL_QUESTIONS: [all visible]" and "ANSWER: All questions on screen have been answered."
+- Respond in ${responseLanguage}`;
 
         // Send to backend which uses system chain to determine provider
         console.log('📸 Sending screen analysis to backend...');
@@ -2561,13 +2596,44 @@ If there are multiple questions, repeat this format for each one.`;
         const data = await response.json();
         const text = data.text || 'No content found to analyze.';
 
-        // Extract question from AI response
+        // Parse all questions and the selected one
         let extractedQuestion = '';
+        let allQuestions: string[] = [];
         let displayText = text;
-        const qMatch = text.match(/QUESTION:\s*(.+?)(?:\n|$)/i);
-        if (qMatch) {
-          extractedQuestion = qMatch[1].trim();
-          displayText = text.replace(/QUESTION:\s*.+?\n?/i, '').trim();
+
+        // Find labels by iterating lines
+        const lines = text.split('\n');
+        let answerFound = -1;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.match(/^ALL_QUESTIONS:\s*/i)) {
+            const val = line.replace(/^ALL_QUESTIONS:\s*/i, '').trim();
+            allQuestions = val.split(',').map((q: string) => q.trim()).filter(Boolean);
+          } else if (line.match(/^QUESTION:\s*/i)) {
+            extractedQuestion = line.replace(/^QUESTION:\s*/i, '').trim();
+          } else if (line.match(/^ANSWER:\s*/i)) {
+            answerFound = i;
+          }
+        }
+
+        // Display everything from ANSWER line onward (without the label)
+        if (answerFound >= 0) {
+          const answerLines = lines.slice(answerFound);
+          answerLines[0] = answerLines[0].replace(/^ANSWER:\s*/i, '');
+          displayText = answerLines.join('\n').trim();
+        }
+
+        // Track answered question
+        if (extractedQuestion) {
+          setAnalyzedQuestions(prev => {
+            const alreadyTracked = prev.some(q => q.toLowerCase() === extractedQuestion.toLowerCase());
+            if (alreadyTracked) return prev;
+            // Add all extracted questions to tracking (so subsequent rounds skip them)
+            const toAdd = allQuestions.length > 0
+              ? allQuestions.filter(q => !prev.some(p => p.toLowerCase() === q.toLowerCase()))
+              : [extractedQuestion];
+            return [...prev, ...toAdd];
+          });
         }
 
         setAiResponse(displayText);
@@ -2582,7 +2648,7 @@ If there are multiple questions, repeat this format for each one.`;
         const updatedHistoryAfterAnalysis = [
           ...chatHistory,
           { role: 'user', parts: [{ text: historyLabel }] },
-          { role: 'model', parts: [{ text }] }
+          { role: 'model', parts: [{ text: displayText }] }
         ];
         setChatHistory(updatedHistoryAfterAnalysis);
         
