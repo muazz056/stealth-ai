@@ -2542,14 +2542,17 @@ Respond in ${langDisplay}.]`
 TASK:
 1. Look at the screenshot below and extract ALL questions visible on screen
 2. List them in order from top to bottom as they appear
-3. The following questions in this list have ALREADY been answered in previous rounds — SKIP them:
+3. The following questions have ALREADY been answered in previous rounds — SKIP them:
 ${analyzedQuestions.length > 0 ? analyzedQuestions.map((q, i) => `   ${i + 1}. "${q}"`).join('\n') : '   (none yet)'}
-4. Pick the FIRST (topmost) question in your list that does NOT appear in the already-answered list — do NOT pick the bottom or most recent one
-5. Answer that question
+4. Answer EVERY question that has NOT been answered yet
+5. If only one question needs answering, just answer it
+6. If multiple questions need answering, answer ALL of them
 
 OUTPUT FORMAT (use EXACTLY this):
-ALL_QUESTIONS: [comma-separated list of every question visible in the screenshot, top to bottom]
-QUESTION: [the next unanswered question]
+ALL_QUESTIONS: [comma-separated list of every question visible, top to bottom]
+
+Then for each unanswered question, repeat this block:
+QUESTION: [the exact question text]
 ANSWER: [your detailed answer]
 
 Prior Q&A context (for follow-up reference only):
@@ -2571,7 +2574,7 @@ ${userMessage ? `\nUser's Specific Question (use as clue to find the right quest
 IMPORTANT RULES:
 - The SCREENSHOT is the PRIMARY source — extract all questions from it
 - Prior Q&A context above is ONLY for follow-up understanding, NOT for re-answering old questions
-- ALL_QUESTIONS must include EVERY question visible, not just the one you're answering
+- ALL_QUESTIONS must include EVERY question visible, not just the ones you're answering
 - When checking if a question is already answered, compare EXACT wording — if even slightly different or reworded, treat it as NEW and answer it
 - If ALL questions have already been answered word-for-word, return "ALL_QUESTIONS: [all visible]" and "ANSWER: All questions on screen have been answered."
 - Respond in ${responseLanguage}`;
@@ -2596,43 +2599,62 @@ IMPORTANT RULES:
         const data = await response.json();
         const text = data.text || 'No content found to analyze.';
 
-        // Parse all questions and the selected one
-        let extractedQuestion = '';
+        // Parse all Q&A pairs from response
+        const qaPairs: Array<{question: string, answer: string}> = [];
+        const blocks = text.split(/\n(?=QUESTION:\s*)/i);
         let allQuestions: string[] = [];
-        let displayText = text;
 
-        // Find labels by iterating lines
-        const lines = text.split('\n');
-        let answerFound = -1;
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (line.match(/^ALL_QUESTIONS:\s*/i)) {
-            const val = line.replace(/^ALL_QUESTIONS:\s*/i, '').trim();
-            allQuestions = val.split(',').map((q: string) => q.trim()).filter(Boolean);
-          } else if (line.match(/^QUESTION:\s*/i)) {
-            extractedQuestion = line.replace(/^QUESTION:\s*/i, '').trim();
-          } else if (line.match(/^ANSWER:\s*/i)) {
-            answerFound = i;
+        for (const block of blocks) {
+          // Extract ALL_QUESTIONS list (comes before any Q&A block)
+          const allQMatch = block.match(/^ALL_QUESTIONS:\s*(.+)/im);
+          if (allQMatch) {
+            allQuestions = allQMatch[1].split(',').map((q: string) => q.trim()).filter(Boolean);
+          }
+
+          // Extract Q&A pair
+          const qMatch = block.match(/^QUESTION:\s*(.+)/im);
+          const aMatch = block.match(/^ANSWER:\s*([\s\S]*)/im);
+          if (qMatch && aMatch) {
+            qaPairs.push({
+              question: qMatch[1].trim(),
+              answer: aMatch[1].trim()
+            });
           }
         }
 
-        // Display everything from ANSWER line onward (without the label)
-        if (answerFound >= 0) {
-          const answerLines = lines.slice(answerFound);
-          answerLines[0] = answerLines[0].replace(/^ANSWER:\s*/i, '');
-          displayText = answerLines.join('\n').trim();
+        // Build display from all Q&A pairs
+        let extractedQuestion = '';
+        let displayText = text;
+
+        if (qaPairs.length > 1) {
+          // Multiple answers: display all numbered
+          extractedQuestion = qaPairs[0].question;
+          displayText = qaPairs.map((pair, i) =>
+            `**Q${i + 1}:** ${pair.question}\n\n**A${i + 1}:** ${pair.answer}`
+          ).join('\n\n---\n\n');
+        } else if (qaPairs.length === 1) {
+          // Single answer: show just the answer
+          extractedQuestion = qaPairs[0].question;
+          displayText = qaPairs[0].answer;
+        } else {
+          // No Q&A pairs — try lone ANSWER: (e.g. "all answered" case)
+          const loneAnswer = text.match(/^ANSWER:\s*([\s\S]*)/im);
+          if (loneAnswer) {
+            displayText = loneAnswer[1].trim();
+          }
         }
 
-        // Track answered question
-        if (extractedQuestion) {
+        // Track all answered questions
+        const answeredQuestions = qaPairs.map(p => p.question);
+        if (answeredQuestions.length > 0) {
           setAnalyzedQuestions(prev => {
-            const alreadyTracked = prev.some(q => q.toLowerCase() === extractedQuestion.toLowerCase());
-            if (alreadyTracked) return prev;
-            // Add all extracted questions to tracking (so subsequent rounds skip them)
-            const toAdd = allQuestions.length > 0
-              ? allQuestions.filter(q => !prev.some(p => p.toLowerCase() === q.toLowerCase()))
-              : [extractedQuestion];
-            return [...prev, ...toAdd];
+            const toAdd = answeredQuestions.filter(q =>
+              !prev.some(p => p.toLowerCase() === q.toLowerCase())
+            );
+            const allFromScreen = allQuestions.filter(q =>
+              !prev.some(p => p.toLowerCase() === q.toLowerCase())
+            );
+            return [...prev, ...toAdd, ...allFromScreen];
           });
         }
 
