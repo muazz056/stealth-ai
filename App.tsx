@@ -254,6 +254,8 @@ Use a structured approach:
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
+- Don't summarize or condense — provide substantive, important information with key insights
+- Use bullet points when listing important details or key takeaways
 - Use "I" not "we" for personal ownership
 - Quantify results wherever the context supports it (%, time saved, users, scale)
 - Avoid filler phrases: "That's a great question", "As I mentioned", "Basically"
@@ -273,16 +275,17 @@ TERM CORRECTION:
   - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
-- If multiple interpretations are possible:
-  - Choose the most likely one based on context
-  - Answer directly without asking clarifying questions
-- If a term cannot be reasonably inferred:
-  - Ignore the unclear term and answer the rest intelligently
+- Always treat unfamiliar or unclear terms as phonetic errors from speech-to-text
+- Infer the closest matching technical term based on context and sound
+- NEVER express confusion, say "I don't understand", or ask clarifying questions
+- Answer directly and confidently based on the most likely intended meaning
+- If a term has no clear match, ignore it and answer the rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain the correction process
 - Answer confidently as if the question was clearly spoken
+- Never say "I don't understand", "I'm not sure", or anything similar — always answer based on the closest phonetic match
 - Never mention you are an AI
 
 ---
@@ -387,6 +390,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const [shortcutErrors, setShortcutErrors] = useState<{[key: string]: string}>({});
   const [showShortcutsSuccess, setShowShortcutsSuccess] = useState(false);
   const [isApiConfigured, setIsApiConfigured] = useState(false);
+  const [chainAlert, setChainAlert] = useState(false);
+  const chainAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [apiError, setApiError] = useState<{title: string, message: string, details?: string} | null>(null);
   const [showOutOfTokensModal, setShowOutOfTokensModal] = useState(false);
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
@@ -2391,6 +2396,11 @@ Respond in ${langDisplay}.]`;
               if (parsed.error) {
                 throw new Error(parsed.error);
               }
+              if (parsed.chainTriggered) {
+                if (chainAlertTimerRef.current) clearTimeout(chainAlertTimerRef.current);
+                setChainAlert(true);
+                chainAlertTimerRef.current = setTimeout(() => setChainAlert(false), 2000);
+              }
               if (parsed.provider) {
                 console.log('🔐 System AI chain provider:', parsed.provider, '/', parsed.model);
               }
@@ -2582,6 +2592,20 @@ Respond in ${langDisplay}.]`;
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 transition-colors duration-300 p-4 md:p-8">
+      {/* Chain Triggered Alert */}
+      {chainAlert && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-5 py-2.5 bg-gradient-to-r from-amber-500/90 to-orange-500/90 backdrop-blur-xl rounded-xl shadow-2xl border border-amber-300/50 text-white text-sm font-semibold tracking-wide flex items-center gap-2.5 animate-pulse">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Model chain triggered
+          <button onClick={() => setChainAlert(false)} className="ml-1 p-0.5 hover:bg-white/20 rounded transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <div className="mx-auto max-w-7xl">
         
         {/* Centered Action Buttons (Electron only) */}

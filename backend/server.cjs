@@ -684,6 +684,8 @@ Use a structured approach:
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
+- Don't summarize or condense — provide substantive, important information with key insights
+- Use bullet points when listing important details or key takeaways
 - Use "I" not "we" for personal ownership
 - Quantify results wherever the context supports it (%, time saved, users, scale)
 - Avoid filler phrases: "That's a great question", "As I mentioned", "Basically"
@@ -703,16 +705,17 @@ TERM CORRECTION:
   - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
-- If multiple interpretations are possible:
-  - Choose the most likely one based on context
-  - Answer directly without asking clarifying questions
-- If a term cannot be reasonably inferred:
-  - Ignore the unclear term and answer the rest intelligently
+- Always treat unfamiliar or unclear terms as phonetic errors from speech-to-text
+- Infer the closest matching technical term based on context and sound
+- NEVER express confusion, say "I don't understand", or ask clarifying questions
+- Answer directly and confidently based on the most likely intended meaning
+- If a term has no clear match, ignore it and answer the rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain the correction process
 - Answer confidently as if the question was clearly spoken
+- Never say "I don't understand", "I'm not sure", or anything similar — always answer based on the closest phonetic match
 - Never mention you are an AI
 
 ---
@@ -841,6 +844,8 @@ Use a structured approach:
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
+- Don't summarize or condense — provide substantive, important information with key insights
+- Use bullet points when listing important details or key takeaways
 - Use "I" not "we" for personal ownership
 - Quantify results wherever the context supports it (%, time saved, users, scale)
 - Avoid filler phrases: "That's a great question", "As I mentioned", "Basically"
@@ -860,16 +865,17 @@ TERM CORRECTION:
   - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
-- If multiple interpretations are possible:
-  - Choose the most likely one based on context
-  - Answer directly without asking clarifying questions
-- If a term cannot be reasonably inferred:
-  - Ignore the unclear term and answer the rest intelligently
+- Always treat unfamiliar or unclear terms as phonetic errors from speech-to-text
+- Infer the closest matching technical term based on context and sound
+- NEVER express confusion, say "I don't understand", or ask clarifying questions
+- Answer directly and confidently based on the most likely intended meaning
+- If a term has no clear match, ignore it and answer the rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain the correction process
 - Answer confidently as if the question was clearly spoken
+- Never say "I don't understand", "I'm not sure", or anything similar — always answer based on the closest phonetic match
 - Never mention you are an AI
 
 ---
@@ -1441,6 +1447,8 @@ Use a structured approach:
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
+- Don't summarize or condense — provide substantive, important information with key insights
+- Use bullet points when listing important details or key takeaways
 - Use "I" not "we" for personal ownership
 - Quantify results wherever the context supports it (%, time saved, users, scale)
 - Avoid filler phrases: "That's a great question", "As I mentioned", "Basically"
@@ -1460,16 +1468,17 @@ TERM CORRECTION:
   - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
-- If multiple interpretations are possible:
-  - Choose the most likely one based on context
-  - Answer directly without asking clarifying questions
-- If a term cannot be reasonably inferred:
-  - Ignore the unclear term and answer the rest intelligently
+- Always treat unfamiliar or unclear terms as phonetic errors from speech-to-text
+- Infer the closest matching technical term based on context and sound
+- NEVER express confusion, say "I don't understand", or ask clarifying questions
+- Answer directly and confidently based on the most likely intended meaning
+- If a term has no clear match, ignore it and answer the rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain the correction process
 - Answer confidently as if the question was clearly spoken
+- Never say "I don't understand", "I'm not sure", or anything similar — always answer based on the closest phonetic match
 - Never mention you are an AI
 
 ---
@@ -3109,27 +3118,15 @@ app.post('/api/summarize', async (req, res) => {
       });
     }
 
-    // Fall back to system AI chain if no user key provided
+    // Read ALL active chain entries for fallback if no explicit apiKey
+    let chainEntries = [];
     if (!apiKey) {
       try {
         const database = await connectDB();
         const config = database.collection('app_config');
         const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
         if (chainDoc?.chain) {
-          let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
-          if (!entry) {
-            entry = chainDoc.chain.find(e => e.active !== false);
-          }
-          if (entry) {
-            apiKey = entry.apiKey;
-            if (!model) model = entry.model;
-            if (entry.provider !== apiProvider) {
-              console.log(`🔐 Switching provider ${apiProvider} → ${entry.provider} (summarize, from system chain)`);
-            }
-            apiProvider = entry.provider;
-            console.log(`🔐 Using system AI chain key for ${apiProvider} (summarize)`);
-            if (model) console.log(`🔐 Using model: ${model}`);
-          }
+          chainEntries = chainDoc.chain.filter(e => e && e.active !== false);
         }
       } catch (chainErr) {
         console.error('Failed to read system AI chain:', chainErr.message);
@@ -3203,157 +3200,199 @@ ${text}`;
       });
     }
 
-    let summary = '';
-
-    // Call AI based on provider
-    if (apiProvider === 'gemini') {
-      if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: 'API key required for Gemini'
-        });
-      }
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              role: 'user',
-              parts: [{ text: summaryPrompt }]
-            }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Gemini API error: ${response.status} - ${JSON.stringify(errorData)}`);
-      }
-
-      const data = await response.json();
-      summary = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    } else if (apiProvider === 'openai') {
-      if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: 'API key required for OpenAI'
-        });
-      }
-
-      const response = await fetch(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model || 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: 'You are a professional resume and job description summarizer.' },
-              { role: 'user', content: summaryPrompt }
-            ]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`OpenAI API error: ${response.status} - ${JSON.stringify(errorData)}`);
-      }
-
-      const data = await response.json();
-      summary = data.choices?.[0]?.message?.content || '';
-
-    } else if (apiProvider === 'claude') {
-      if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: 'API key required for Claude'
-        });
-      }
-
-      const response = await fetch(
-        'https://api.anthropic.com/v1/messages',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: model || 'claude-3-5-sonnet-20241022',
-            max_tokens: 300,
-            messages: [
-              { role: 'user', content: summaryPrompt }
-            ]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Claude API error: ${response.status} - ${JSON.stringify(errorData)}`);
-      }
-
-      const data = await response.json();
-      summary = data.content?.[0]?.text || '';
-
-    } else if (apiProvider === 'groq') {
-      if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: 'API key required for Groq'
-        });
-      }
-
-      const response = await fetch(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model || 'meta-llama/llama-4-scout-17b-16e-instruct',
-            messages: [
-              { role: 'system', content: 'You are a professional meeting assistant.' },
-              { role: 'user', content: summaryPrompt }
-            ]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ Groq API error response:', errorData);
-        throw new Error(`Groq API error: ${response.status} - ${JSON.stringify(errorData)}`);
-      }
-
-      const data = await response.json();
-      summary = data.choices?.[0]?.message?.content || '';
-      console.log('✅ Groq summary generated, length:', summary.length);
-
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid API provider. Must be: gemini, openai, claude, or groq'
-      });
+    // If explicit apiKey was provided, use it directly (no chain fallback)
+    if (req.body.apiKey) {
+      chainEntries = [];
     }
 
-    res.json({
-      success: true,
-      summary: summary.trim()
+    let chainTriggered = false;
+    let lastError = null;
+
+    // --- CHAIN FALLBACK: try each active chain entry ---
+    for (let i = 0; i < (chainEntries.length > 0 ? chainEntries.length : 1); i++) {
+      let currentProvider = apiProvider;
+      let currentKey = apiKey;
+      let currentModel = model;
+
+      if (chainEntries.length > 0) {
+        const entry = chainEntries[i];
+        if (i > 0) chainTriggered = true;
+        currentProvider = entry.provider;
+        currentKey = entry.apiKey;
+        currentModel = entry.model || model;
+
+        if (!currentKey) {
+          lastError = new Error(`No API key for chain entry ${i} (${currentProvider})`);
+          continue;
+        }
+
+        if (chainTriggered) {
+          console.log(`⚠️ Chain fallback to ${currentProvider} / ${currentModel || 'default model'} (summarize)`);
+        }
+        console.log(`🔐 Using system AI chain key for ${currentProvider} (summarize)`);
+      }
+
+      try {
+        let summary = '';
+
+        // Call AI based on provider
+        if (currentProvider === 'gemini') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Gemini');
+            continue;
+          }
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${currentModel || 'gemini-2.5-flash'}:generateContent?key=${currentKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  role: 'user',
+                  parts: [{ text: summaryPrompt }]
+                }]
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Gemini API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+
+          const data = await response.json();
+          summary = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        } else if (currentProvider === 'openai') {
+          if (!currentKey) {
+            lastError = new Error('API key required for OpenAI');
+            continue;
+          }
+
+          const response = await fetch(
+            'https://api.openai.com/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentKey}`
+              },
+              body: JSON.stringify({
+                model: currentModel || 'gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: 'You are a professional resume and job description summarizer.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`OpenAI API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
+        } else if (currentProvider === 'claude') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Claude');
+            continue;
+          }
+
+          const response = await fetch(
+            'https://api.anthropic.com/v1/messages',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': currentKey,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: currentModel || 'claude-3-5-sonnet-20241022',
+                max_tokens: 300,
+                messages: [
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Claude API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+
+          const data = await response.json();
+          summary = data.content?.[0]?.text || '';
+
+        } else if (currentProvider === 'groq') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Groq');
+            continue;
+          }
+
+          const response = await fetch(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentKey}`
+              },
+              body: JSON.stringify({
+                model: currentModel || 'meta-llama/llama-4-scout-17b-16e-instruct',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error('❌ Groq API error response:', errorData);
+            throw new Error(`Groq API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+          console.log('✅ Groq summary generated, length:', summary.length);
+
+        } else {
+          lastError = new Error(`Invalid API provider: ${currentProvider}`);
+          if (chainEntries.length === 0) {
+            return res.status(400).json({ success: false, message: `Invalid API provider: ${currentProvider}` });
+          }
+          continue;
+        }
+
+        // Success
+        return res.json({ success: true, summary: summary.trim(), chainTriggered });
+
+      } catch (error) {
+        lastError = error;
+        if (chainEntries.length > 0) {
+          console.log(`⚠️ Provider ${currentProvider} failed (${error.message}), trying next in chain...`);
+          continue;
+        } else {
+          // No chain — just throw for the outer catch
+          throw error;
+        }
+      }
+    }
+
+    // All providers in the chain failed
+    console.error('❌ All chain providers failed:', lastError?.message);
+    return res.status(500).json({
+      success: false,
+      message: lastError?.message || 'All AI providers failed',
+      chainTriggered: true
     });
-    
-    console.log('✅ Summarization complete, summary length:', summary.trim().length);
 
   } catch (error) {
     console.error('❌ Summarization error:', error);
@@ -3397,8 +3436,175 @@ app.post('/api/generate-stream', async (req, res) => {
     let apiProvider = req.body.apiProvider;
     let apiKey = reqApiKey;
     let model = reqModel;
+    let chainTriggered = false;
+    let lastError = null;
+    let chainEntries = [];
 
-    // Check if user is an admin — admins must use their own API config
+    const doStream = async (provider, key, mdl, msgs) => {
+      let convertedMessages = msgs;
+      if (provider === 'gemini') {
+        convertedMessages = msgs.map((msg) => ({
+          role: msg.role === 'assistant' ? 'model' : msg.role,
+          parts: [{ text: msg.content || '' }]
+        }));
+      } else {
+        convertedMessages = msgs.map((msg) => ({
+          role: msg.role === 'model' ? 'assistant' : msg.role,
+          content: msg.parts?.[0]?.text || msg.content || ''
+        }));
+      }
+
+      if (provider === 'gemini') {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${mdl || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: convertedMessages })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Gemini API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6);
+              if (jsonStr === '[DONE]') continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'openai') {
+        const response = await fetch(
+          'https://api.openai.com/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'gpt-4o-mini', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`OpenAI API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'claude') {
+        const response = await fetch(
+          'https://api.anthropic.com/v1/messages',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: mdl || 'claude-3-5-sonnet-20241022', max_tokens: 4000, messages: convertedMessages, stream: true })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Claude API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                if (data.type === 'content_block_delta' && data.delta?.text) {
+                  res.write(`data: ${JSON.stringify({ text: data.delta.text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'groq') {
+        const response = await fetch(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'meta-llama/llama-4-scout-17b-16e-instruct', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Groq API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else {
+        throw new Error(`Unsupported provider: ${provider}`);
+      }
+    };
+
+    // Check if user is an admin — admins must use their own API config (no chain fallback)
     if (userId && ObjectId.isValid(userId)) {
       try {
         const database = await connectDB();
@@ -3409,6 +3615,12 @@ app.post('/api/generate-stream', async (req, res) => {
             apiKey = user.apiKeys[user.selectedProvider];
             model = user.selectedModel;
             console.log(`🔐 Using admin's own API config: ${apiProvider} / ${model}`);
+            console.log(`🤖 Streaming with provider: ${apiProvider} / ${model || 'default model'}`);
+            res.write(`data: ${JSON.stringify({ provider: apiProvider, model: model || 'default' })}\n\n`);
+            await doStream(apiProvider, apiKey, model, messages);
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
           } else {
             console.log('❌ Admin missing own API config');
             res.write(`data: ${JSON.stringify({ error: 'Admin must configure own API provider, model, and API key in settings.' })}\n\n`);
@@ -3416,25 +3628,13 @@ app.post('/api/generate-stream', async (req, res) => {
             return res.end();
           }
         } else {
-          // Non-admin: fall back to system AI chain
+          // Non-admin: collect ALL active system chain entries for fallback
           try {
             const database = await connectDB();
             const config = database.collection('app_config');
             const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
             if (chainDoc?.chain) {
-              let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
-              if (!entry) {
-                entry = chainDoc.chain.find(e => e.active !== false);
-              }
-              if (entry) {
-                if (!apiKey) apiKey = entry.apiKey;
-                if (!model) model = entry.model;
-                if (entry.provider !== apiProvider) {
-                  console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
-                }
-                apiProvider = entry.provider;
-                console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
-              }
+              chainEntries = chainDoc.chain.filter(e => e && e.active !== false);
             }
           } catch (chainErr) {
             console.error('Failed to read system AI chain:', chainErr.message);
@@ -3444,31 +3644,70 @@ app.post('/api/generate-stream', async (req, res) => {
         console.error('Failed to look up user:', userErr.message);
       }
     } else {
-      // No userId provided: fall back to system AI chain
+      // No userId: collect ALL active system chain entries for fallback
       try {
         const database = await connectDB();
         const config = database.collection('app_config');
         const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
         if (chainDoc?.chain) {
-          let entry = chainDoc.chain.find(e => e.provider === apiProvider && e.active !== false);
-          if (!entry) {
-            entry = chainDoc.chain.find(e => e.active !== false);
-          }
-          if (entry) {
-            if (!apiKey) apiKey = entry.apiKey;
-            if (!model) model = entry.model;
-            if (entry.provider !== apiProvider) {
-              console.log(`🔐 Switching provider from "${apiProvider || 'none'}" → "${entry.provider}" (from system chain)`);
-            }
-            apiProvider = entry.provider;
-            console.log(`🔐 Using system AI chain: ${apiProvider} / ${model || 'default model'}`);
-          }
+          chainEntries = chainDoc.chain.filter(e => e && e.active !== false);
         }
       } catch (chainErr) {
         console.error('Failed to read system AI chain:', chainErr.message);
       }
     }
 
+    // If an explicit API key was provided in the request body, skip chain fallback
+    if (reqApiKey) {
+      apiKey = reqApiKey;
+      chainEntries = [];
+    }
+
+    // --- CHAIN FALLBACK MODE: try each active chain entry in order ---
+    if (chainEntries.length > 0) {
+      for (let i = 0; i < chainEntries.length; i++) {
+        const entry = chainEntries[i];
+        if (i > 0) chainTriggered = true;
+
+        apiProvider = entry.provider;
+        apiKey = entry.apiKey;
+        model = entry.model;
+
+        if (!apiKey) {
+          lastError = new Error(`No API key for chain entry ${i} (${apiProvider})`);
+          continue;
+        }
+
+        if (chainTriggered) {
+          console.log(`⚠️ Chain fallback to ${apiProvider} / ${model || 'default model'}`);
+        }
+        console.log(`🤖 Streaming with provider: ${apiProvider} / ${model || 'default model'}`);
+
+        // Send provider metadata with chainTriggered flag
+        res.write(`data: ${JSON.stringify({ provider: apiProvider, model: model || 'default', chainTriggered })}\n\n`);
+
+        try {
+          await doStream(apiProvider, apiKey, model, messages);
+          // Streaming completed successfully
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        } catch (error) {
+          lastError = error;
+          console.log(`⚠️ Provider ${apiProvider} failed (${error.message}), trying next in chain...`);
+          continue;
+        }
+      }
+
+      // All providers in the chain failed
+      console.error('❌ All chain providers failed:', lastError?.message);
+      res.write(`data: ${JSON.stringify({ error: lastError?.message || 'All AI providers failed' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
+    // --- SINGLE PROVIDER MODE: no chain fallback ---
     if (!apiKey) {
       console.log('❌ No API key available for provider:', apiProvider || 'unknown');
       res.write(`data: ${JSON.stringify({ error: `No API key configured for ${apiProvider || 'unknown'}` })}\n\n`);
@@ -3477,253 +3716,18 @@ app.post('/api/generate-stream', async (req, res) => {
     }
 
     console.log(`🤖 Streaming with provider: ${apiProvider} / ${model || 'default model'}`);
-
-    // Send provider metadata to frontend
     res.write(`data: ${JSON.stringify({ provider: apiProvider, model: model || 'default' })}\n\n`);
 
-    // Convert messages to target provider format
-    let convertedMessages = messages;
-    if (apiProvider === 'gemini') {
-      // Convert from OpenAI format {role, content} to Gemini format {role, parts}
-      convertedMessages = messages.map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : msg.role,
-        parts: [{ text: msg.content || '' }]
-      }));
-    } else {
-      // Ensure OpenAI-compatible format (content as string)
-      convertedMessages = messages.map((msg) => ({
-        role: msg.role === 'model' ? 'assistant' : msg.role,
-        content: msg.parts?.[0]?.text || msg.content || ''
-      }));
+    try {
+      await doStream(apiProvider, apiKey, model, messages);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (error) {
+      console.error('❌ Streaming error:', error);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
     }
-    messages = convertedMessages;
-
-    // --- GEMINI STREAMING ---
-    if (apiProvider === 'gemini') {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: messages })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        res.write(`data: ${JSON.stringify({ error: `Gemini API error: ${response.status} - ${errorData}` })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
-      }
-
-      // Stream Gemini response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6);
-            if (jsonStr === '[DONE]') continue;
-            try {
-              const data = JSON.parse(jsonStr);
-              const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              if (text) {
-                res.write(`data: ${JSON.stringify({ text })}\n\n`);
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
-
-    // --- OPENAI STREAMING ---
-    } else if (apiProvider === 'openai') {
-      const response = await fetch(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model || 'gpt-4o-mini',
-            messages: messages,
-            stream: true,
-            max_tokens: 4000
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        res.write(`data: ${JSON.stringify({ error: `OpenAI API error: ${response.status} - ${errorData}` })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
-      }
-
-      // Stream OpenAI response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') continue;
-            if (!jsonStr) continue;
-            try {
-              const data = JSON.parse(jsonStr);
-              const text = data.choices?.[0]?.delta?.content || '';
-              if (text) {
-                res.write(`data: ${JSON.stringify({ text })}\n\n`);
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
-
-    // --- CLAUDE STREAMING ---
-    } else if (apiProvider === 'claude') {
-      const response = await fetch(
-        'https://api.anthropic.com/v1/messages',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: model || 'claude-3-5-sonnet-20241022',
-            max_tokens: 4000,
-            messages: messages,
-            stream: true
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        res.write(`data: ${JSON.stringify({ error: `Claude API error: ${response.status} - ${errorData}` })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
-      }
-
-      // Stream Claude response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-            try {
-              const data = JSON.parse(jsonStr);
-              // Claude sends content_block_delta events with text
-              if (data.type === 'content_block_delta' && data.delta?.text) {
-                res.write(`data: ${JSON.stringify({ text: data.delta.text })}\n\n`);
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
-
-    // --- GROQ STREAMING ---
-    } else if (apiProvider === 'groq') {
-      const response = await fetch(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model || 'meta-llama/llama-4-scout-17b-16e-instruct',
-            messages: messages,
-            stream: true,
-            max_tokens: 4000
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        res.write(`data: ${JSON.stringify({ error: `Groq API error: ${response.status} - ${errorData}` })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
-      }
-
-      // Stream Groq response (OpenAI-compatible format)
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') continue;
-            if (!jsonStr) continue;
-            try {
-              const data = JSON.parse(jsonStr);
-              const text = data.choices?.[0]?.delta?.content || '';
-              if (text) {
-                res.write(`data: ${JSON.stringify({ text })}\n\n`);
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
-
-    } else {
-      res.write(`data: ${JSON.stringify({ error: 'Invalid API provider' })}\n\n`);
-    }
-
-    // Send done signal
-    res.write('data: [DONE]\n\n');
-    res.end();
 
   } catch (error) {
     console.error('❌ Streaming error:', error);
@@ -3744,135 +3748,163 @@ app.post('/api/analyze-screen', async (req, res) => {
       return res.status(400).json({ error: 'Missing image data' });
     }
 
-    let apiProvider, apiKey, model;
+    // Use only the last 4 history messages for follow-up context
+    const recentMessages = (messages || []).slice(-4);
 
-    // Read chain to determine provider
+    // Read ALL active chain entries for fallback
+    let chainEntries = [];
     try {
       const database = await connectDB();
       const config = database.collection('app_config');
       const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
       if (chainDoc?.chain) {
-        const entry = chainDoc.chain.find(e => e.active !== false);
-        if (entry) {
-          apiKey = entry.apiKey;
-          model = entry.model;
-          apiProvider = entry.provider;
-          console.log(`🔐 Screen analyze using system chain: ${apiProvider} / ${model || 'default model'}`);
-        }
+        chainEntries = chainDoc.chain.filter(e => e && e.active !== false);
       }
     } catch (chainErr) {
       console.error('Failed to read system AI chain:', chainErr.message);
     }
 
-    if (!apiKey) {
-      return res.status(400).json({ error: `No API key configured for ${apiProvider || 'unknown'}` });
+    if (chainEntries.length === 0) {
+      return res.status(400).json({ error: 'No active AI model configured in system chain' });
     }
 
-    // Use only the last 4 history messages for follow-up context
-    const recentMessages = (messages || []).slice(-4);
+    let chainTriggered = false;
+    let lastError = null;
 
-    let text = '';
+    for (let i = 0; i < chainEntries.length; i++) {
+      const entry = chainEntries[i];
+      if (i > 0) chainTriggered = true;
 
-    if (apiProvider === 'gemini') {
-      const contents = recentMessages.map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content || msg.parts?.[0]?.text || '' }]
-      }));
-      contents.push({
-        role: 'user',
-        parts: [
-          { text: prompt || 'Analyze this screenshot' },
-          { inline_data: { mime_type: 'image/png', data: image } }
-        ]
-      });
+      const apiProvider = entry.provider;
+      const apiKey = entry.apiKey;
+      const model = entry.model;
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents })
+      if (!apiKey) {
+        lastError = new Error(`No API key for ${apiProvider}`);
+        continue;
+      }
+
+      if (chainTriggered) {
+        console.log(`⚠️ Chain fallback to ${apiProvider} / ${model || 'default model'}`);
+      }
+      console.log(`🔐 Screen analyze using system chain: ${apiProvider} / ${model || 'default model'}`);
+
+      try {
+        let text = '';
+
+        if (apiProvider === 'gemini') {
+          const contents = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: msg.content || msg.parts?.[0]?.text || '' }]
+          }));
+          contents.push({
+            role: 'user',
+            parts: [
+              { text: prompt || 'Analyze this screenshot' },
+              { inline_data: { mime_type: 'image/png', data: image } }
+            ]
+          });
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents })
+            }
+          );
+
+          if (!response.ok) throw new Error(`Gemini API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        } else if (apiProvider === 'openai') {
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'gpt-4o-mini', messages: msgs, max_tokens: 4000 })
+          });
+
+          if (!response.ok) throw new Error(`OpenAI API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'claude') {
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } },
+              { type: 'text', text: prompt || 'Analyze this screenshot' }
+            ]
+          });
+
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', messages: msgs, max_tokens: 4000 })
+          });
+
+          if (!response.ok) throw new Error(`Claude API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.content?.[0]?.text || '';
+
+        } else if (apiProvider === 'groq') {
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+
+          const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'meta-llama/llama-4-scout-17b-16e-instruct', messages: msgs, max_tokens: 4000 })
+          });
+
+          if (!response.ok) throw new Error(`Groq API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else {
+          lastError = new Error(`Unsupported provider: ${apiProvider}`);
+          continue;
         }
-      );
 
-      if (!response.ok) throw new Error(`Gemini API error: ${response.status} - ${await response.text()}`);
-      const data = await response.json();
-      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // Success — return result with chainTriggered flag
+        return res.json({ text, chainTriggered });
 
-    } else if (apiProvider === 'openai') {
-      const msgs = recentMessages.map((msg) => ({
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || msg.parts?.[0]?.text || ''
-      }));
-      msgs.push({
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt || 'Analyze this screenshot' },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
-        ]
-      });
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: model || 'gpt-4o-mini', messages: msgs, max_tokens: 4000 })
-      });
-
-      if (!response.ok) throw new Error(`OpenAI API error: ${response.status} - ${await response.text()}`);
-      const data = await response.json();
-      text = data.choices?.[0]?.message?.content || '';
-
-    } else if (apiProvider === 'claude') {
-      const msgs = recentMessages.map((msg) => ({
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || msg.parts?.[0]?.text || ''
-      }));
-      msgs.push({
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } },
-          { type: 'text', text: prompt || 'Analyze this screenshot' }
-        ]
-      });
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', messages: msgs, max_tokens: 4000 })
-      });
-
-      if (!response.ok) throw new Error(`Claude API error: ${response.status} - ${await response.text()}`);
-      const data = await response.json();
-      text = data.content?.[0]?.text || '';
-
-    } else if (apiProvider === 'groq') {
-      const msgs = recentMessages.map((msg) => ({
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || msg.parts?.[0]?.text || ''
-      }));
-      msgs.push({
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt || 'Analyze this screenshot' },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
-        ]
-      });
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: model || 'meta-llama/llama-4-scout-17b-16e-instruct', messages: msgs, max_tokens: 4000 })
-      });
-
-      if (!response.ok) throw new Error(`Groq API error: ${response.status} - ${await response.text()}`);
-      const data = await response.json();
-      text = data.choices?.[0]?.message?.content || '';
-
-    } else {
-      return res.status(400).json({ error: `Unsupported provider: ${apiProvider}` });
+      } catch (error) {
+        lastError = error;
+        console.log(`⚠️ Provider ${apiProvider} failed (${error.message}), trying next in chain...`);
+        continue;
+      }
     }
 
-    res.json({ text });
+    // All providers in the chain failed
+    console.error('❌ All chain providers failed:', lastError?.message);
+    return res.status(500).json({ error: lastError?.message || 'All AI providers failed', chainTriggered: true });
 
   } catch (error) {
     console.error('❌ Screen analyze error:', error);
@@ -3888,52 +3920,66 @@ function setupDeepgramProxy(server) {
   deepgramWss.on('connection', async (ws, req) => {
     try {
       const url = new URL(req.url, 'http://localhost');
-      let apiKey = url.searchParams.get('apiKey');
+      let queryApiKey = url.searchParams.get('apiKey');
       const language = url.searchParams.get('language') || 'en-US';
       
-      if (!apiKey) {
+      // Collect ALL active Deepgram key chain entries for fallback
+      let chainEntries = [];
+      if (!queryApiKey) {
         try {
           const database = await connectDB();
           const config = database.collection('app_config');
           const chainDoc = await config.findOne({ _id: 'deepgram_key_chain' });
           if (chainDoc?.chain) {
-            const entry = chainDoc.chain.find(e => e.active !== false);
-            if (entry) {
-              apiKey = entry.apiKey;
-              console.log('🎧 Using system Deepgram key chain');
-            }
+            chainEntries = chainDoc.chain.filter(e => e && e.active !== false && e.apiKey);
+            console.log(`🎧 Using system Deepgram key chain (${chainEntries.length} entries)`);
           }
         } catch (chainErr) {
           console.error('Failed to read Deepgram chain:', chainErr.message);
         }
       }
       
-      if (!apiKey) {
+      if (!queryApiKey && chainEntries.length === 0) {
         ws.close(4001, 'API key required');
         return;
       }
       
-      const deepgramUrl =
+      const deepgramUrlBase =
         'wss://api.deepgram.com/v1/listen?model=nova-3&language=' + language +
         '&interim_results=true&vad_events=true' +
         '&smart_format=true&punctuate=true&endpointing=100&utterance_end_ms=1000' +
         '&encoding=opus&container=webm';
-
-      console.log('🎧 Deepgram proxy opening connection to:', deepgramUrl);
-      console.log('🎧 Deepgram proxy sending Authorization header for API key length', apiKey.length);
       
       let dgWs;
+      let currentChainIndex = 0; // For iterating through chain keys
       let connectAttempts = 0;
       const maxConnectAttempts = 3;
       let clientChunkCount = 0;
       let clientChunkBytes = 0;
       let userInitiatedClose = false;
+
+      function getCurrentApiKey() {
+        if (queryApiKey) return queryApiKey;
+        return chainEntries[currentChainIndex]?.apiKey;
+      }
       
       function createDeepgramConnection() {
+        const currentKey = getCurrentApiKey();
+        if (!currentKey) {
+          console.error('🎧 No valid Deepgram API key at chain index', currentChainIndex);
+          if (queryApiKey) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid API key' }));
+            ws.close();
+          } else {
+            ws.close(4001, 'All Deepgram keys exhausted');
+          }
+          return;
+        }
+
         connectAttempts++;
-        console.log(`🎧 Deepgram connection attempt ${connectAttempts}/${maxConnectAttempts}`);
+        console.log(`🎧 Deepgram connection attempt ${connectAttempts}/${maxConnectAttempts} (chain key #${currentChainIndex + 1})`);
         
-        dgWs = new WebSocket(deepgramUrl, { headers: { 'Authorization': 'Token ' + apiKey } });
+        dgWs = new WebSocket(deepgramUrlBase, { headers: { 'Authorization': 'Token ' + currentKey } });
         
         let deepgramMessageCount = 0;
         let firstDeepgramMessageLogged = false;
@@ -3945,12 +3991,22 @@ function setupDeepgramProxy(server) {
             return;
           }
           console.error('Deepgram error:', err.message, 'stack:', err.stack);
+          
+          // Try next key in chain if available
+          if (!queryApiKey && currentChainIndex + 1 < chainEntries.length) {
+            currentChainIndex++;
+            connectAttempts = 0;
+            console.log(`⚠️ Chain fallback to Deepgram key #${currentChainIndex + 1} after error`);
+            setTimeout(createDeepgramConnection, 200);
+            return;
+          }
+          
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'error', message: err.message }));
           }
           if (connectAttempts < maxConnectAttempts) {
             const delay = Math.min(500 * connectAttempts, 2000);
-            console.log(`🎧 Retrying Deepgram connection in ${delay}ms... (attempt ${connectAttempts + 1})`);
+            console.log(`🎧 Retrying Deepgram connection with same key in ${delay}ms... (attempt ${connectAttempts + 1})`);
             setTimeout(createDeepgramConnection, delay);
           }
         });
@@ -3964,8 +4020,17 @@ function setupDeepgramProxy(server) {
             statusCode: res.statusCode,
             statusMessage: res.statusMessage,
             headers: responseHeaders,
-            url: deepgramUrl
+            url: deepgramUrlBase
           });
+
+          // On 400/401/429, try next key in chain
+          if (!queryApiKey && currentChainIndex + 1 < chainEntries.length) {
+            currentChainIndex++;
+            connectAttempts = 0;
+            console.log(`⚠️ Chain fallback to Deepgram key #${currentChainIndex + 1} after status ${res.statusCode}`);
+            setTimeout(createDeepgramConnection, 200);
+            return;
+          }
         });
         
         dgWs.on('open', () => {

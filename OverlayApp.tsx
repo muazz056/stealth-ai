@@ -133,6 +133,8 @@ Use a structured approach:
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
+- Don't summarize or condense — provide substantive, important information with key insights
+- Use bullet points when listing important details or key takeaways
 - Use "I" not "we" for personal ownership
 - Quantify results wherever the context supports it (%, time saved, users, scale)
 - Avoid filler phrases: "That's a great question", "As I mentioned", "Basically"
@@ -152,16 +154,17 @@ TERM CORRECTION:
   - Do NOT invent new skills or tools not supported by context
 
 CLARIFICATION:
-- If multiple interpretations are possible:
-  - Choose the most likely one based on context
-  - Answer directly without asking clarifying questions
-- If a term cannot be reasonably inferred:
-  - Ignore the unclear term and answer the rest intelligently
+- Always treat unfamiliar or unclear terms as phonetic errors from speech-to-text
+- Infer the closest matching technical term based on context and sound
+- NEVER express confusion, say "I don't understand", or ask clarifying questions
+- Answer directly and confidently based on the most likely intended meaning
+- If a term has no clear match, ignore it and answer the rest intelligently
 
 RESPONSE BEHAVIOR:
 - Do NOT mention transcription errors or corrections
 - Do NOT explain the correction process
 - Answer confidently as if the question was clearly spoken
+- Never say "I don't understand", "I'm not sure", or anything similar — always answer based on the closest phonetic match
 - Never mention you are an AI
 
 ---
@@ -497,6 +500,8 @@ const OverlayApp: React.FC = () => {
   const [apiError, setApiError] = useState<{title: string, message: string, details?: string} | null>(null);
   const [shortcuts, setShortcuts] = useState<any>({});
   const [qaPairs, setQaPairs] = useState<Array<{question: string, answer: string}>>([]); // Q&A pairs
+  const [chainAlert, setChainAlert] = useState(false);
+  const chainAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [newPairTrigger, setNewPairTrigger] = useState(0); // Trigger to force navigation to latest
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   
@@ -2421,6 +2426,11 @@ Respond in ${langDisplay}.]`
               if (parsed.error) {
                 throw new Error(parsed.error);
               }
+              if (parsed.chainTriggered) {
+                if (chainAlertTimerRef.current) clearTimeout(chainAlertTimerRef.current);
+                setChainAlert(true);
+                chainAlertTimerRef.current = setTimeout(() => setChainAlert(false), 2000);
+              }
               if (parsed.text) {
                 streamedText += parsed.text;
                 if (!formatStripped) {
@@ -2544,7 +2554,7 @@ TASK:
 2. List them in order from top to bottom as they appear
 3. The following questions have ALREADY been answered in previous rounds — SKIP them:
 ${analyzedQuestions.length > 0 ? analyzedQuestions.map((q, i) => `   ${i + 1}. "${q}"`).join('\n') : '   (none yet)'}
-4. Answer EVERY question that has NOT been answered yet
+4. Answer ONLY questions that are NOT in the skip list above
 5. If only one question needs answering, just answer it
 6. If multiple questions need answering, answer ALL of them
 
@@ -2575,6 +2585,7 @@ IMPORTANT RULES:
 - The SCREENSHOT is the PRIMARY source — extract all questions from it
 - Prior Q&A context above is ONLY for follow-up understanding, NOT for re-answering old questions
 - ALL_QUESTIONS must include EVERY question visible, not just the ones you're answering
+- CRITICAL: You MUST NOT output QUESTION:/ANSWER: for any question in the skip list. Only output QUESTION:/ANSWER: for questions NOT in the skip list
 - When checking if a question is already answered, compare EXACT wording — if even slightly different or reworded, treat it as NEW and answer it
 - If ALL questions have already been answered word-for-word, return "ALL_QUESTIONS: [all visible]" and "ANSWER: All questions on screen have been answered."
 - Respond in ${responseLanguage}`;
@@ -2599,6 +2610,13 @@ IMPORTANT RULES:
         const data = await response.json();
         const text = data.text || 'No content found to analyze.';
 
+        // Show chain triggered alert if fallback occurred
+        if (data.chainTriggered) {
+          if (chainAlertTimerRef.current) clearTimeout(chainAlertTimerRef.current);
+          setChainAlert(true);
+          chainAlertTimerRef.current = setTimeout(() => setChainAlert(false), 2000);
+        }
+
         // Parse all Q&A pairs from response
         const qaPairs: Array<{question: string, answer: string}> = [];
         const blocks = text.split(/\n(?=QUESTION:\s*)/i);
@@ -2622,39 +2640,48 @@ IMPORTANT RULES:
           }
         }
 
-        // Build display from all Q&A pairs
+        // CLIENT-SIDE FILTER: Remove Q&A pairs whose questions are already answered
+        // This is the authoritative filter — even if the AI ignores skip instructions
+        const unansweredPairs = qaPairs.filter(pair =>
+          !analyzedQuestions.some(aq => aq.toLowerCase() === pair.question.toLowerCase())
+        );
+
+        // Build display from unanswered (new/changed) Q&A pairs only
         let extractedQuestion = '';
         let displayText = text;
 
-        if (qaPairs.length > 1) {
-          // Multiple answers: display all numbered
-          extractedQuestion = qaPairs[0].question;
-          displayText = qaPairs.map((pair, i) =>
-            `**Q${i + 1}:** ${pair.question}\n\n**A${i + 1}:** ${pair.answer}`
-          ).join('\n\n---\n\n');
-        } else if (qaPairs.length === 1) {
-          // Single answer: show just the answer
-          extractedQuestion = qaPairs[0].question;
-          displayText = qaPairs[0].answer;
+        if (unansweredPairs.length > 0) {
+          if (unansweredPairs.length > 1) {
+            extractedQuestion = unansweredPairs[0].question;
+            const questionsHeader = unansweredPairs.map(p => p.question).join(', ');
+            displayText = `**Questions:** ${questionsHeader}\n\n---\n\n` +
+              unansweredPairs.map((pair, i) =>
+                `**Q${i + 1}:** ${pair.question}\n\n**A${i + 1}:** ${pair.answer}`
+              ).join('\n\n---\n\n');
+          } else {
+            extractedQuestion = unansweredPairs[0].question;
+            displayText = unansweredPairs[0].answer;
+          }
         } else {
-          // No Q&A pairs — try lone ANSWER: (e.g. "all answered" case)
+          // No new Q&A pairs — try lone ANSWER: (e.g. "all answered" case)
           const loneAnswer = text.match(/^ANSWER:\s*([\s\S]*)/im);
           if (loneAnswer) {
             displayText = loneAnswer[1].trim();
           }
+          extractedQuestion = allQuestions.length > 0 ? allQuestions.join(', ') : '';
         }
 
-        // Track all answered questions
-        const answeredQuestions = qaPairs.map(p => p.question);
-        if (answeredQuestions.length > 0) {
+        // Track all newly answered questions (only the ones we're displaying)
+        const newAnswered = unansweredPairs.map(p => p.question);
+        if (newAnswered.length > 0 || allQuestions.length > 0) {
           setAnalyzedQuestions(prev => {
-            const toAdd = answeredQuestions.filter(q =>
-              !prev.some(p => p.toLowerCase() === q.toLowerCase())
-            );
-            const allFromScreen = allQuestions.filter(q =>
-              !prev.some(p => p.toLowerCase() === q.toLowerCase())
-            );
-            return [...prev, ...toAdd, ...allFromScreen];
+            const combined = new Set<string>();
+            prev.forEach(q => combined.add(q));
+            // Add newly answered questions
+            newAnswered.forEach(q => combined.add(q));
+            // Add ALL questions from screen (for exact-wording comparison next round)
+            allQuestions.forEach(q => combined.add(q));
+            return Array.from(combined);
           });
         }
 
@@ -3037,6 +3064,20 @@ ${companyInfoSummary}`;
 
   return (
     <div className="w-full h-screen bg-gradient-to-br from-gray-900/30 via-blue-900/25 to-gray-900/30 backdrop-blur-md p-4 flex flex-col relative rounded-2xl overflow-hidden border border-blue-500/30 shadow-[0_8px_32px_0_rgba(31,38,135,0.37)]">
+      {/* Chain Triggered Alert */}
+      {chainAlert && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-5 py-2.5 bg-gradient-to-r from-amber-500/90 to-orange-500/90 backdrop-blur-xl rounded-xl shadow-2xl border border-amber-300/50 text-white text-sm font-semibold tracking-wide flex items-center gap-2.5 animate-pulse">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Model chain triggered
+          <button onClick={() => setChainAlert(false)} className="ml-1 p-0.5 hover:bg-white/20 rounded transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       {/* Custom Title Bar for Dragging - Enhanced with Glassmorphism */}
       <div 
         className="absolute top-0 left-0 right-0 h-12 bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-blue-600/20 backdrop-blur-xl cursor-move z-0 flex items-center justify-between transition-all duration-300 rounded-t-2xl border-b border-blue-400/30 shadow-lg px-3 hover:border-blue-400/50"
