@@ -130,6 +130,41 @@ Use a structured approach:
 
 ---
 
+ANSWER ENHANCEMENT GUIDELINES:
+When shaping responses, weave in these elements naturally where they fit:
+
+**Tech Stack Narrative:**
+- Subtly distinguish tools the candidate used vs. excels at vs. is excited to work with
+- Highlight how strengths in one area (e.g., AI/ML) complement broader full-stack experience
+
+**Tough Challenges:**
+- Outline the specific problem identified, the steps taken, and how success was measured
+- Concrete details about key challenges showcase problem-solving and impact
+
+**Achievements & Growth:**
+- Add a concise reflection on lessons learned from each project
+- Show how those insights drive ongoing growth and a proactive mindset
+
+**Startup / Culture Fit:**
+- Connect past experiences to why the candidate thrives in dynamic, fast-paced environments
+- Link enthusiasm for the role to agile, innovative settings
+
+**Unknown Technologies / Architectures:**
+- If asked about a stack or architecture not in the candidate's background, construct a logical approach based on related experience and first principles
+- Answer confidently — frame it as "here's how I would approach it" rather than admitting unfamiliarity
+- Draw parallels from known technologies to show adaptive thinking
+
+**Project Variety:**
+- If a question is not a direct follow-up to a previously discussed project, choose a different project with a closely related stack or situation
+- Spread project examples across answers to cover maximum breadth of experience
+- Avoid reusing the same project unless the question specifically follows up on it
+
+**Response Structure:**
+- Organize with a brief introduction → key actions taken → outcome achieved
+- Makes answers more compelling and easier to follow
+
+---
+
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
@@ -519,6 +554,7 @@ const OverlayApp: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const inputFieldRef = useRef<HTMLTextAreaElement>(null); // For auto-focus and auto-resize
+  const answerAreaRef = useRef<HTMLDivElement>(null);
   const analyzeScreenRef = useRef<(() => Promise<void>) | null>(null); // For shortcut access
   const wantToListenRef = useRef(false); // Track if user wants to listen
   const getAnswerRef = useRef<(() => Promise<void>) | null>(null); // For Ctrl+Enter shortcut
@@ -1379,14 +1415,20 @@ const OverlayApp: React.FC = () => {
       const isInputFocused = activeElement?.tagName === 'INPUT' || 
                              activeElement?.tagName === 'TEXTAREA';
       
-      if (isInputFocused || qaPairs.length <= 1) return;
+      if (isInputFocused) return;
       
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowLeft' && qaPairs.length > 1) {
         e.preventDefault();
         setCurrentPairIndex(prev => Math.max(0, prev - 1));
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' && qaPairs.length > 1) {
         e.preventDefault();
         setCurrentPairIndex(prev => Math.min(qaPairs.length - 1, prev + 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        answerAreaRef.current?.scrollBy({ top: -100, behavior: 'smooth' });
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        answerAreaRef.current?.scrollBy({ top: 100, behavior: 'smooth' });
       }
     };
     
@@ -1463,6 +1505,37 @@ const OverlayApp: React.FC = () => {
     }
   }, []);
 
+  // Listen for shortcut updates from main App
+  useEffect(() => {
+    const handleShortcutUpdate = () => {
+      try {
+        const userStr = localStorage.getItem(LS_USER_KEY);
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          const defaults = getDefaultShortcuts();
+          const merged = { ...defaults };
+          if (user.shortcuts) {
+            for (const [action, val] of Object.entries(user.shortcuts)) {
+              const userShortcut = val as any;
+              const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action;
+              merged[mappedAction] = {
+                ...(defaults[mappedAction] || {}),
+                action: mappedAction as any,
+                modifier: userShortcut.modifier || defaults[mappedAction]?.modifier,
+                defaultKey: userShortcut.defaultKey || userShortcut.key || defaults[mappedAction]?.defaultKey
+              } as ShortcutConfig;
+            }
+          }
+          setShortcuts(merged);
+        }
+      } catch (e) {
+        console.error('[Overlay] Failed to update shortcuts:', e);
+      }
+    };
+    window.addEventListener('user-shortcuts-updated', handleShortcutUpdate);
+    return () => window.removeEventListener('user-shortcuts-updated', handleShortcutUpdate);
+  }, []);
+
   // Configurable shortcut keydown handler
   useEffect(() => {
     const handleShortcutKeyDown = (e: KeyboardEvent) => {
@@ -1516,9 +1589,15 @@ const OverlayApp: React.FC = () => {
               setCommittedText('');
               setInterimText('');
               break;
-            case 'focusInput':
-              if (inputFieldRef.current) inputFieldRef.current.focus();
+            case 'focusInput': {
+              const isFocused = document.activeElement === inputFieldRef.current;
+              if (isFocused) {
+                inputFieldRef.current?.blur();
+              } else {
+                inputFieldRef.current?.focus();
+              }
               break;
+            }
             case 'stopOrClear':
               if (isGeneratingRef.current) {
                 handleStopResponse();
@@ -1547,6 +1626,7 @@ const OverlayApp: React.FC = () => {
       
       // Alt key - Toggle focus on input field
       if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
         const activeElement = document.activeElement;
         const isInputFocused = activeElement === inputFieldRef.current;
         
@@ -3474,7 +3554,7 @@ ${companyInfoSummary}`;
 
       {/* AI Response - Hide when browser is active */}
       {!browserMode && (aiResponse || isGenerating || isAnalyzing || qaPairs.length > 0) && (
-        <div className="flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 overflow-y-auto border border-blue-400/20 shadow-inner">
+        <div ref={answerAreaRef} className="flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 overflow-y-auto border border-blue-400/20 shadow-inner max-h-[500px]">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-green-300 text-xs font-bold uppercase drop-shadow-lg">
               {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Answer'}

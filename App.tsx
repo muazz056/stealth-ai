@@ -251,6 +251,41 @@ Use a structured approach:
 
 ---
 
+ANSWER ENHANCEMENT GUIDELINES:
+When shaping responses, weave in these elements naturally where they fit:
+
+**Tech Stack Narrative:**
+- Subtly distinguish tools the candidate used vs. excels at vs. is excited to work with
+- Highlight how strengths in one area (e.g., AI/ML) complement broader full-stack experience
+
+**Tough Challenges:**
+- Outline the specific problem identified, the steps taken, and how success was measured
+- Concrete details about key challenges showcase problem-solving and impact
+
+**Achievements & Growth:**
+- Add a concise reflection on lessons learned from each project
+- Show how those insights drive ongoing growth and a proactive mindset
+
+**Startup / Culture Fit:**
+- Connect past experiences to why the candidate thrives in dynamic, fast-paced environments
+- Link enthusiasm for the role to agile, innovative settings
+
+**Unknown Technologies / Architectures:**
+- If asked about a stack or architecture not in the candidate's background, construct a logical approach based on related experience and first principles
+- Answer confidently — frame it as "here's how I would approach it" rather than admitting unfamiliarity
+- Draw parallels from known technologies to show adaptive thinking
+
+**Project Variety:**
+- If a question is not a direct follow-up to a previously discussed project, choose a different project with a closely related stack or situation
+- Spread project examples across answers to cover maximum breadth of experience
+- Avoid reusing the same project unless the question specifically follows up on it
+
+**Response Structure:**
+- Organize with a brief introduction → key actions taken → outcome achieved
+- Makes answers more compelling and easier to follow
+
+---
+
 ANSWER QUALITY RULES:
 - Lead with the strongest point — no long wind-ups
 - Keep answers focused: 60–120 seconds of speech equivalent (~100–200 words) unless question demands more
@@ -502,24 +537,13 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     onLogout();
   };
 
-  // Sync user settings when user data updates (from MongoDB)
+  // Load shortcuts once: try localStorage first, fall back to DB (user prop)
   useEffect(() => {
-    if (user?.selectedProvider) {
-      console.log('📡 Setting provider to:', user.selectedProvider);
-      setApiProvider(user.selectedProvider);
-    }
-    if (user?.voiceProvider) {
-      console.log('🎤 Setting voice provider to:', user.voiceProvider);
-      setVoiceProvider(user.voiceProvider);
-    }
-    if (user?.deepgramLanguage) {
-      setDeepgramLanguage(user.deepgramLanguage);
-    }
-    if (user?.shortcuts) {
-      // Merge user shortcuts with frontend defaults preserving labels/descriptions
+    if (shortcutsLoadedRef.current) return;
+    const mergeShortcuts = (source: any) => {
       const defaults = getDefaultShortcuts();
       const merged = { ...defaults };
-      for (const [action, val] of Object.entries(user.shortcuts)) {
+      for (const [action, val] of Object.entries(source)) {
         const userShortcut = val as any;
         const mappedAction = action === 'focusQuestion' ? 'focusInput' : action === 'minimizeToggle' ? 'toggleOverlay' : action === 'startStopListen' ? 'toggleListen' : action;
         merged[mappedAction] = {
@@ -530,8 +554,23 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         } as ShortcutConfig;
       }
       setShortcuts(merged);
-    } else {
-      setShortcuts(getDefaultShortcuts());
+      shortcutsLoadedRef.current = true;
+    };
+    try {
+      const userStr = localStorage.getItem(LS_USER_KEY);
+      if (userStr) {
+        const localUser = JSON.parse(userStr);
+        if (localUser.shortcuts) {
+          mergeShortcuts(localUser.shortcuts);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load shortcuts from localStorage:', e);
+    }
+    // Fallback to DB (user prop from backend)
+    if (user?.shortcuts) {
+      mergeShortcuts(user.shortcuts);
     }
   }, [user]);
 
@@ -836,38 +875,25 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       
-      // Alt key - Toggle focus on input field
-      if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
-        const activeElement = document.activeElement;
-        const isInputFocused = activeElement?.tagName === 'INPUT' || 
-                               activeElement?.tagName === 'TEXTAREA';
-        
-        if (isInputFocused) {
-          (activeElement as HTMLElement).blur();
-          console.log('⌨️ Alt pressed - Unfocusing input field (for arrow navigation)');
-        } else {
-          const questionInput = document.querySelector('textarea[placeholder*="question"]') as HTMLElement;
-          if (questionInput) {
-            questionInput.focus();
-            console.log('⌨️ Alt pressed - Focusing input field');
-          }
-        }
-        return;
-      }
-      
       // Arrow keys - Only handle if input field is not focused
       const activeElement = document.activeElement;
       const isInputFocused = activeElement?.tagName === 'INPUT' || 
                              activeElement?.tagName === 'TEXTAREA';
       
-      if (isInputFocused || qaPairs.length <= 1) return;
+      if (isInputFocused) return;
       
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowLeft' && qaPairs.length > 1) {
         e.preventDefault();
         setCurrentPairIndex(prev => Math.max(0, prev - 1));
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' && qaPairs.length > 1) {
         e.preventDefault();
         setCurrentPairIndex(prev => Math.min(qaPairs.length - 1, prev + 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        answerAreaRef.current?.scrollBy({ top: -100, behavior: 'smooth' });
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        answerAreaRef.current?.scrollBy({ top: 100, behavior: 'smooth' });
       }
     };
     
@@ -881,7 +907,10 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const hasPrimaryMod = e.ctrlKey || e.metaKey;
-      if (hasPrimaryMod && e.key === 'Enter') {
+      // Only use hardcoded Ctrl+Enter if getAnswer still uses default binding
+      const getAnswerDefault = shortcuts['getAnswer'];
+      const isDefaultGetAnswer = getAnswerDefault?.modifier === 'Control' && getAnswerDefault?.defaultKey === 'Enter';
+      if (isDefaultGetAnswer && hasPrimaryMod && e.key === 'Enter') {
         e.preventDefault();
         
         if (isListening) {
@@ -940,46 +969,32 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                           e.keyCode === 220 ||
                           e.which === 220;
       
-      if (hasPrimaryMod && isBackslash) {
+      // Only use hardcoded Ctrl+\ if toggleListen still uses default binding
+      const toggleDefault = shortcuts['toggleListen'];
+      const isDefaultToggle = toggleDefault?.modifier === 'Control' && (toggleDefault?.defaultKey === '\\' || toggleDefault?.defaultKey === 'Backslash');
+      
+      if (isDefaultToggle && hasPrimaryMod && isBackslash) {
         e.preventDefault();
         e.stopPropagation();
-        
-        console.log('✅ Ctrl+\\ detected in App.tsx! isListening:', isListening);
-        console.log('🔍 Refs available:', {
-          startListenRef: !!startListenRef.current,
-          stopListenRef: !!stopListenRef.current
-        });
-        
         if (isListening) {
-          console.log('🛑 Calling stopListenRef.current()');
-          if (stopListenRef.current) {
-            stopListenRef.current();
-          } else {
-            console.error('❌ stopListenRef.current is NULL!');
-          }
+          if (stopListenRef.current) stopListenRef.current();
         } else {
-          console.log('▶️ Calling startListenRef.current()');
-          if (startListenRef.current) {
-            startListenRef.current();
-          } else {
-            console.error('❌ startListenRef.current is NULL!');
-          }
+          if (startListenRef.current) startListenRef.current();
         }
         return;
       }
       
-      // Ctrl+Backspace - Clear question field
-      if (hasPrimaryMod && e.key === 'Backspace') {
+      // Only use hardcoded Ctrl+Backspace if clearQuestion still uses default binding
+      const clearDefault = shortcuts['clearQuestion'];
+      const isDefaultClear = clearDefault?.modifier === 'Control' && clearDefault?.defaultKey === 'Delete';
+      
+      if (isDefaultClear && hasPrimaryMod && e.key === 'Delete') {
         e.preventDefault();
-        console.log('🧹 Ctrl+Backspace - Clearing');
         setManualTextInput('');
         setTranscribedText('');
         setCommittedText('');
         setInterimText('');
-        const questionInput = document.querySelector('textarea[placeholder*="question"]') as HTMLTextAreaElement;
-        if (questionInput) {
-          questionInput.focus();
-        }
+        questionInputRef.current?.focus();
       }
       
       // ESC key - Stop response or Clear all
@@ -1064,7 +1079,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
                 const text = (isListeningRef.current ? transcribedTextRef.current : manualTextInputRef.current).trim();
                 console.log(`🎯 getAnswer triggered, text: "${text}"`);
                 if (text) {
-                  triggerGetAnswerRef.current = triggerGetAnswerRef.current + 1;
+                  setTriggerGetAnswer(prev => prev + 1);
                 }
               }
               break;
@@ -1075,8 +1090,12 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
               setInterimText('');
               break;
             case 'focusInput': {
-              const input = document.querySelector('textarea[placeholder*="question"]') as HTMLTextAreaElement;
-              if (input) input.focus();
+              const isFocused = document.activeElement === questionInputRef.current;
+              if (isFocused) {
+                questionInputRef.current?.blur();
+              } else {
+                questionInputRef.current?.focus();
+              }
               break;
             }
             case 'stopOrClear':
@@ -1214,6 +1233,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const deepgramMixAudioContextRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const questionInputRef = useRef<HTMLTextAreaElement>(null);
+  const answerAreaRef = useRef<HTMLDivElement>(null);
   const appLog = (...parts: any[]) => {
     const message = parts
       .map((p) => (typeof p === 'string' ? p : (() => { try { return JSON.stringify(p); } catch { return String(p); } })()))
@@ -1233,7 +1253,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const manualTextInputRef = useRef(manualTextInput);
   const transcribedTextRef = useRef(transcribedText);
   const isGeneratingRef = useRef(isGenerating);
-  const triggerGetAnswerRef = useRef(0);
+  const shortcutsLoadedRef = useRef(false);
+  const [triggerGetAnswer, setTriggerGetAnswer] = useState(0);
   
   useEffect(() => { apiProviderRef.current = apiProvider; }, [apiProvider]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
@@ -1262,10 +1283,10 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   
   // Watch for shortcut trigger - call handleGetAnswer when counter changes
   useEffect(() => {
-    if (triggerGetAnswerRef.current > 0) {
+    if (triggerGetAnswer > 0) {
       handleGetAnswer();
     }
-  }, [triggerGetAnswerRef.current]);
+  }, [triggerGetAnswer]);
 
   // Ensure the question textarea grows when text is updated programmatically
   useEffect(() => {
@@ -1745,6 +1766,9 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         let deepgramReady$ = false;
         const pendingChunks$: any[] = [];
         
+        // Start recorder immediately so audio chunks are buffered while WS connects
+        mediaRecorder.start(100);
+        
         mediaRecorder.ondataavailable = (ev) => {
           if (ev.data.size > 0) {
             if (deepgramReady$ && ws.readyState === WebSocket.OPEN) {
@@ -1755,13 +1779,10 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
           }
         };
         
-        ws.onopen = () => {
-          mediaRecorder.start(100);
-        };
-        
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log('🎧 App.tsx browser received:', data.type, data.channel?.alternatives?.[0]?.transcript || '', 'is_final:', data.is_final);
             
             if (data.type === 'connected') {
               deepgramReady$ = true;
@@ -1785,7 +1806,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
               }
             }
           } catch (e) {
-            // Ignore
+            console.error('Deepgram WS parse error:', e, 'raw:', (event as any).data);
           }
         };
         
@@ -3437,7 +3458,7 @@ Respond in ${langDisplay}.]`;
                 </div>
 
             {/* AI Response */}
-            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-3 sm:p-5 min-h-[180px] md:min-h-[250px]">
+            <div ref={answerAreaRef} className="bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-3 sm:p-5 min-h-[180px] md:min-h-[250px] overflow-y-auto max-h-[500px]">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">
                   {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Response'}

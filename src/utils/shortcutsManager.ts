@@ -85,7 +85,7 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       action: 'clearQuestion',
       label: 'Clear Field',
       description: 'Clear the question input field',
-      defaultKey: 'Backspace',
+      defaultKey: 'Delete',
       modifier: primaryMod
     },
     focusInput: {
