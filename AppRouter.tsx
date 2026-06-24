@@ -241,6 +241,24 @@ const AppRouterContent: React.FC = () => {
     };
   }, []);
 
+  // Listen for full user data refresh (from App.tsx refresh button)
+  useEffect(() => {
+    const handleUserDataRefreshed = (event: any) => {
+      const { user: freshUser } = event.detail;
+      setCurrentUser((prevUser: any) => {
+        if (!prevUser) return prevUser;
+        const updatedUser = { ...prevUser, ...freshUser };
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+        return updatedUser;
+      });
+    };
+
+    window.addEventListener('user-data-refreshed', handleUserDataRefreshed as EventListener);
+    return () => {
+      window.removeEventListener('user-data-refreshed', handleUserDataRefreshed as EventListener);
+    };
+  }, []);
+
   const handleAuthSuccess = (user: any, accessToken?: string, refreshToken?: string) => {
     if (accessToken) setAccessToken(accessToken);
     if (refreshToken) setRefreshToken(refreshToken);

@@ -420,6 +420,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const [showContextSaved, setShowContextSaved] = useState(false);
   const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
   const [showManualSummarySaved, setShowManualSummarySaved] = useState(false);
+  const [showRawKnowledgebaseSaved, setShowRawKnowledgebaseSaved] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [shortcuts, setShortcuts] = useState<ShortcutsState>(getDefaultShortcuts());
   const [shortcutErrors, setShortcutErrors] = useState<{[key: string]: string}>({});
@@ -670,9 +671,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         if (s.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', s.jobDescriptionSummary);
         if (s.companyInfoSummary) localStorage.setItem('isa_company_info_summary', s.companyInfoSummary);
       } catch (err) {
-        console.error('❌ Failed to refresh user settings:', err);
-        // If unable to fetch user (deleted/not found), force logout to avoid ghost sessions
-        forceLogout();
+        console.error('❌ Failed to refresh user settings from DB, keeping cached data:', err);
+        // Don't force logout on transient network errors — localStorage user is fallback
       }
     };
 
@@ -705,6 +705,16 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         if (freshUser.deepgramKeyterms !== undefined) setDeepgramKeyterms(freshUser.deepgramKeyterms);
         const mergedUser = { ...user, ...freshUser };
         localStorage.setItem(LS_USER_KEY, JSON.stringify(mergedUser));
+        // Notify AppRouter to update its currentUser with full fresh data
+        window.dispatchEvent(new CustomEvent('user-data-refreshed', { detail: { user: freshUser } }));
+        // Also dispatch token-specific event for TokenBadge/Navbar
+        if (freshUser.tokens !== undefined) {
+          window.dispatchEvent(new CustomEvent('user-tokens-updated', { detail: { tokens: freshUser.tokens } }));
+        }
+        // Also dispatch shortcut event if shortcuts were refreshed
+        if (freshUser.shortcuts) {
+          window.dispatchEvent(new CustomEvent('user-shortcuts-updated', { detail: { shortcuts: freshUser.shortcuts } }));
+        }
       }
       // Refresh chat history from DB
       const historyResult = await messagesClient.getHistory(user._id);
@@ -715,6 +725,50 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
       console.error('❌ Data refresh failed:', error);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Store raw knowledgebase text to DB without generating summaries
+  const handleStoreRawKnowledgebase = async () => {
+    try {
+      const rawSettings = {
+        basePrompt,
+        jobDescription,
+        companyInfo,
+        cvText: resume?.content || settings.cvText || '',
+        cvSummary: settings.cvSummary || '',
+        basePromptSummary: settings.basePromptSummary || '',
+        jobDescriptionSummary: settings.jobDescriptionSummary || '',
+        companyInfoSummary: settings.companyInfoSummary || ''
+      };
+
+      const result = await authClient.updateSettings(user._id, rawSettings);
+      if (result && result.success) {
+        const updatedUser = { ...user, settings: { ...user.settings, ...rawSettings } };
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+        if (rawSettings.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, rawSettings.basePrompt);
+        if (rawSettings.jobDescription) localStorage.setItem(LS_JD_KEY, rawSettings.jobDescription);
+        if (rawSettings.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, rawSettings.companyInfo);
+        if (rawSettings.cvSummary) localStorage.setItem('isa_cv_summary', rawSettings.cvSummary);
+        if (rawSettings.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', rawSettings.basePromptSummary);
+        if (rawSettings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', rawSettings.jobDescriptionSummary);
+        if (rawSettings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', rawSettings.companyInfoSummary);
+        setShowRawKnowledgebaseSaved(true);
+        setTimeout(() => setShowRawKnowledgebaseSaved(false), 2500);
+      } else {
+        setApiError({
+          title: 'Save Failed',
+          message: 'Could not save raw knowledgebase',
+          details: 'Please retry'
+        });
+      }
+    } catch (error: any) {
+      console.error('❌ Raw knowledgebase save error:', error);
+      setApiError({
+        title: 'Save Failed',
+        message: error.message || 'Could not save raw knowledgebase',
+        details: 'Please retry'
+      });
     }
   };
 
@@ -2984,7 +3038,7 @@ Respond in ${langDisplay}.]`;
         {/* Section 2: Meeting Context (2-Column Layout) */}
         <div className="mb-6 bg-white dark:bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none p-4 sm:p-5 lg:p-6">
           <div className="mb-6">
-            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Meeting Context</h2>
+            <h2 className="text-base font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">Knowledge Context</h2>
             <p className="text-xs text-slate-500 dark:text-slate-500">Provide information for personalized AI responses</p>
           </div>
 
@@ -3032,15 +3086,6 @@ Respond in ${langDisplay}.]`;
                 <AutoExpandTextarea
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
-                  onBlur={() => {
-                    // Auto-save on blur
-                    if (user._id) {
-                      apiClient('/auth/settings', {
-                        method: 'PUT',
-                        body: JSON.stringify({ userId: user._id, settings: { jobDescription } })
-                      }).catch(err => console.error('Failed to save JD:', err));
-                    }
-                  }}
                   placeholder="Paste the job description here..."
                   minHeight="120px"
                   maxHeight="400px"
@@ -3058,15 +3103,6 @@ Respond in ${langDisplay}.]`;
                 <AutoExpandTextarea
                   value={companyInfo}
                   onChange={(e) => setCompanyInfo(e.target.value)}
-                  onBlur={() => {
-                    // Auto-save on blur
-                    if (user._id) {
-                      apiClient('/auth/settings', {
-                        method: 'PUT',
-                        body: JSON.stringify({ userId: user._id, settings: { companyInfo } })
-                      }).catch(err => console.error('Failed to save Company Info:', err));
-                    }
-                  }}
                   placeholder="Add company details..."
                   minHeight="120px"
                   maxHeight="400px"
@@ -3190,6 +3226,18 @@ Respond in ${langDisplay}.]`;
                   </button>
               {showManualSummarySaved && (
                 <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Summaries saved</div>
+              )}
+                </div>
+
+            <div className="pt-2">
+                  <button
+                onClick={handleStoreRawKnowledgebase}
+                className="w-full px-6 py-3 rounded-xl font-bold text-sm transition-all duration-200 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-800/30 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-600/50 hover:border-amber-500 dark:hover:border-amber-500"
+                  >
+                Store Raw Knowledgebase
+                  </button>
+              {showRawKnowledgebaseSaved && (
+                <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Raw knowledgebase saved</div>
               )}
                 </div>
               </div>

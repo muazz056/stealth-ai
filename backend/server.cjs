@@ -2347,6 +2347,14 @@ app.post('/api/auth/super-admin/ai-chain', async (req, res) => {
       return res.status(400).json({ success: false, message: 'userId and chain are required' });
     }
     await verifySuperAdmin(database, userId);
+
+    // Validate identityName uniqueness within the chain
+    const identityNames = chain.map(e => e.identityName).filter(Boolean);
+    const duplicates = identityNames.filter((name, i) => identityNames.indexOf(name) !== i);
+    if (duplicates.length > 0) {
+      return res.status(400).json({ success: false, message: `Duplicate identity names found: ${[...new Set(duplicates)].join(', ')}` });
+    }
+
     const config = database.collection('app_config');
     await config.updateOne(
       { _id: 'ai_model_chain' },
@@ -2394,6 +2402,14 @@ app.post('/api/auth/super-admin/deepgram-chain', async (req, res) => {
       return res.status(400).json({ success: false, message: 'userId and chain are required' });
     }
     await verifySuperAdmin(database, userId);
+
+    // Validate identityName uniqueness within the chain
+    const identityNames = chain.map(e => e.identityName).filter(Boolean);
+    const duplicates = identityNames.filter((name, i) => identityNames.indexOf(name) !== i);
+    if (duplicates.length > 0) {
+      return res.status(400).json({ success: false, message: `Duplicate identity names found: ${[...new Set(duplicates)].join(', ')}` });
+    }
+
     const config = database.collection('app_config');
     await config.updateOne(
       { _id: 'deepgram_key_chain' },

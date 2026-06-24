@@ -8,12 +8,16 @@ interface AIModel {
   apiKey: string;
   model: string;
   order: number;
+  identityName: string;
+  active?: boolean;
 }
 
 interface DeepgramKey {
   apiKey: string;
   provider: string;
   order: number;
+  identityName: string;
+  active?: boolean;
 }
 
 interface UserData {
@@ -53,14 +57,18 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
   const [aiFormData, setAiFormData] = useState({
     provider: '',
     apiKey: '',
-    model: ''
+    model: '',
+    identityName: ''
   });
+  const [editingAiIndex, setEditingAiIndex] = useState<number | null>(null);
 
   // Deepgram form state
   const [deepgramFormData, setDeepgramFormData] = useState({
     apiKey: '',
-    provider: ''
+    provider: '',
+    identityName: ''
   });
+  const [editingDeepgramIndex, setEditingDeepgramIndex] = useState<number | null>(null);
 
   // User management state
   const [users, setUsers] = useState<UserData[]>([]);
@@ -104,22 +112,69 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
     }
   };
 
+  const resetAiForm = () => {
+    setAiFormData({ provider: '', apiKey: '', model: '', identityName: '' });
+    setEditingAiIndex(null);
+  };
+
+  const resetDeepgramForm = () => {
+    setDeepgramFormData({ apiKey: '', provider: '', identityName: '' });
+    setEditingDeepgramIndex(null);
+  };
+
   const addAiModel = () => {
     if (!aiFormData.provider || !aiFormData.apiKey || !aiFormData.model) {
       setMessage({ type: 'error', text: 'All AI model fields are required' });
       return;
     }
+    if (!aiFormData.identityName.trim()) {
+      setMessage({ type: 'error', text: 'Identity Name is required and must be unique' });
+      return;
+    }
 
-    const newModel: AIModel = {
-      provider: aiFormData.provider,
-      apiKey: aiFormData.apiKey,
-      model: aiFormData.model,
-      order: aiChain.length + 1
-    };
+    // Check uniqueness of identityName (skip current editing entry)
+    const duplicate = aiChain.some((m, i) =>
+      m.identityName?.toLowerCase() === aiFormData.identityName.trim().toLowerCase() && i !== editingAiIndex
+    );
+    if (duplicate) {
+      setMessage({ type: 'error', text: `Identity Name "${aiFormData.identityName}" already exists in the chain` });
+      return;
+    }
 
-    setAiChain([...aiChain, newModel]);
-    setAiFormData({ provider: '', apiKey: '', model: '' });
-    setMessage({ type: 'success', text: 'AI model added to chain' });
+    if (editingAiIndex !== null) {
+      // Update existing entry
+      const updated = aiChain.map((model, idx) =>
+        idx === editingAiIndex
+          ? { ...model, provider: aiFormData.provider, apiKey: aiFormData.apiKey, model: aiFormData.model, identityName: aiFormData.identityName }
+          : model
+      );
+      setAiChain(updated);
+      setMessage({ type: 'success', text: 'AI model updated' });
+    } else {
+      // Add new entry
+      const newModel: AIModel = {
+        provider: aiFormData.provider,
+        apiKey: aiFormData.apiKey,
+        model: aiFormData.model,
+        order: aiChain.length + 1,
+        identityName: aiFormData.identityName,
+        active: true
+      };
+      setAiChain([...aiChain, newModel]);
+      setMessage({ type: 'success', text: 'AI model added to chain' });
+    }
+    resetAiForm();
+  };
+
+  const startEditAiModel = (index: number) => {
+    const model = aiChain[index];
+    setAiFormData({
+      provider: model.provider,
+      apiKey: model.apiKey,
+      model: model.model,
+      identityName: model.identityName || ''
+    });
+    setEditingAiIndex(index);
   };
 
   const removeAiModel = (index: number) => {
@@ -127,6 +182,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
       ...model,
       order: idx + 1
     })));
+    if (editingAiIndex === index) resetAiForm();
   };
 
   const addDeepgramKey = () => {
@@ -139,16 +195,52 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
       setMessage({ type: 'error', text: 'API key is required for Deepgram provider' });
       return;
     }
+    if (!deepgramFormData.identityName.trim()) {
+      setMessage({ type: 'error', text: 'Identity Name is required and must be unique' });
+      return;
+    }
 
-    const newKey: DeepgramKey = {
-      apiKey: deepgramFormData.provider === 'deepgram' ? deepgramFormData.apiKey : '',
-      provider: deepgramFormData.provider,
-      order: deepgramChain.length + 1
-    };
+    // Check uniqueness of identityName (skip current editing entry)
+    const duplicate = deepgramChain.some((k, i) =>
+      k.identityName?.toLowerCase() === deepgramFormData.identityName.trim().toLowerCase() && i !== editingDeepgramIndex
+    );
+    if (duplicate) {
+      setMessage({ type: 'error', text: `Identity Name "${deepgramFormData.identityName}" already exists in the chain` });
+      return;
+    }
 
-    setDeepgramChain([...deepgramChain, newKey]);
-    setDeepgramFormData({ apiKey: '', provider: '' });
-    setMessage({ type: 'success', text: `${deepgramFormData.provider === 'deepgram' ? 'Deepgram API key' : 'Default provider'} added to chain` });
+    if (editingDeepgramIndex !== null) {
+      // Update existing entry
+      const updated = deepgramChain.map((key, idx) =>
+        idx === editingDeepgramIndex
+          ? { ...key, provider: deepgramFormData.provider, apiKey: deepgramFormData.provider === 'deepgram' ? deepgramFormData.apiKey : '', identityName: deepgramFormData.identityName }
+          : key
+      );
+      setDeepgramChain(updated);
+      setMessage({ type: 'success', text: 'Provider updated' });
+    } else {
+      // Add new entry
+      const newKey: DeepgramKey = {
+        apiKey: deepgramFormData.provider === 'deepgram' ? deepgramFormData.apiKey : '',
+        provider: deepgramFormData.provider,
+        order: deepgramChain.length + 1,
+        identityName: deepgramFormData.identityName,
+        active: true
+      };
+      setDeepgramChain([...deepgramChain, newKey]);
+      setMessage({ type: 'success', text: `${deepgramFormData.provider === 'deepgram' ? 'Deepgram API key' : 'Default provider'} added to chain` });
+    }
+    resetDeepgramForm();
+  };
+
+  const startEditDeepgramKey = (index: number) => {
+    const key = deepgramChain[index];
+    setDeepgramFormData({
+      apiKey: key.apiKey,
+      provider: key.provider,
+      identityName: key.identityName || ''
+    });
+    setEditingDeepgramIndex(index);
   };
 
   const removeDeepgramKey = (index: number) => {
@@ -156,6 +248,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
       ...key,
       order: idx + 1
     })));
+    if (editingDeepgramIndex === index) resetDeepgramForm();
   };
 
   const saveAiChain = async () => {
@@ -392,6 +485,22 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
             <div className="mb-6 space-y-3">
               <div>
                 <label className={`block text-sm font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Identity Name <span className="text-xs font-normal opacity-70">(unique identifier)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., OpenAI Production, Gemini Backup"
+                  value={aiFormData.identityName}
+                  onChange={(e) => setAiFormData({ ...aiFormData, identityName: e.target.value })}
+                  className={`w-full px-4 py-2 rounded border transition-colors ${
+                    isDarkMode
+                      ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   Provider API
                 </label>
                 <select
@@ -447,12 +556,22 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                   }`}
                 />
               </div>
-              <button
-                onClick={addAiModel}
-                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition-colors"
-              >
-                ➕ Add Model
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={addAiModel}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition-colors"
+                >
+                  {editingAiIndex !== null ? '✏️ Update Model' : '➕ Add Model'}
+                </button>
+                {editingAiIndex !== null && (
+                  <button
+                    onClick={resetAiForm}
+                    className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Chain List */}
@@ -465,7 +584,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                     isDarkMode
                       ? 'bg-slate-700/50 border-slate-600'
                       : 'bg-slate-100 border-slate-300'
-                  }`}>
+                  } ${editingAiIndex === index ? 'ring-2 ring-blue-500' : ''}`}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${
@@ -478,6 +597,13 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                         <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                           {model.provider}
                         </span>
+                        {model.identityName && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            isDarkMode ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {model.identityName}
+                          </span>
+                        )}
                       </div>
                       <p className={`text-sm truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                         Model: {model.model}
@@ -487,6 +613,13 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                       </p>
                     </div>
                     <div className="flex gap-2 ml-2">
+                      <button
+                        onClick={() => startEditAiModel(index)}
+                        className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded text-sm transition-colors"
+                        title="Edit this entry"
+                      >
+                        ✏️
+                      </button>
                       {index > 0 && (
                         <button
                           onClick={() => moveAiModel(index, 'up')}
@@ -539,6 +672,22 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
             <div className="mb-6 space-y-3">
               <div>
                 <label className={`block text-sm font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Identity Name <span className="text-xs font-normal opacity-70">(unique identifier)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Deepgram Primary, Deepgram Backup"
+                  value={deepgramFormData.identityName}
+                  onChange={(e) => setDeepgramFormData({ ...deepgramFormData, identityName: e.target.value })}
+                  className={`w-full px-4 py-2 rounded border transition-colors ${
+                    isDarkMode
+                      ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   Voice Provider
                 </label>
                 <select
@@ -573,12 +722,22 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                   />
                 </div>
               )}
-              <button
-                onClick={addDeepgramKey}
-                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition-colors"
-              >
-                ➕ Add Provider
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={addDeepgramKey}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition-colors"
+                >
+                  {editingDeepgramIndex !== null ? '✏️ Update Provider' : '➕ Add Provider'}
+                </button>
+                {editingDeepgramIndex !== null && (
+                  <button
+                    onClick={resetDeepgramForm}
+                    className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Chain List */}
@@ -591,7 +750,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                     isDarkMode
                       ? 'bg-slate-700/50 border-slate-600'
                       : 'bg-slate-100 border-slate-300'
-                  }`}>
+                  } ${editingDeepgramIndex === index ? 'ring-2 ring-blue-500' : ''}`}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${
@@ -604,12 +763,26 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                         <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                           {key.provider}
                         </span>
+                        {key.identityName && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            isDarkMode ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {key.identityName}
+                          </span>
+                        )}
                       </div>
                       <p className={`text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                         {key.provider === 'deepgram' ? `Key: ${key.apiKey.substring(0, 20)}...` : 'No API key required'}
                       </p>
                     </div>
                     <div className="flex gap-2 ml-2">
+                      <button
+                        onClick={() => startEditDeepgramKey(index)}
+                        className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded text-sm transition-colors"
+                        title="Edit this entry"
+                      >
+                        ✏️
+                      </button>
                       {index > 0 && (
                         <button
                           onClick={() => moveDeepgramKey(index, 'up')}

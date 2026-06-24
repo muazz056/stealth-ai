@@ -722,7 +722,7 @@ const OverlayApp: React.FC = () => {
   };
 
   // Helper: Save chat history to MongoDB and localStorage
-  const saveChatHistory = async (history: any[]) => {
+  const saveChatHistory = async (history: any[], skipTokenConsumption = false) => {
     try {
       // Save to localStorage as fallback
       localStorage.setItem(LS_CHAT_HISTORY_KEY, JSON.stringify(history));
@@ -744,7 +744,8 @@ const OverlayApp: React.FC = () => {
               }
               
               // ==================== CONSUME TOKEN AFTER SUCCESSFUL ANSWER (OVERLAY) ====================
-              // Consume 1 token (1 question = 1 token)
+              // Consume 1 token (1 question = 1 token) — skipped if caller handles their own consumption
+              if (skipTokenConsumption) return;
               const consumeResult = await tokensClient.consumeTokens(user._id, 1);
               if (consumeResult.success) {
                 console.log('✅ Token consumed in overlay! Remaining:', consumeResult.tokens);
@@ -2604,6 +2605,36 @@ Respond in ${langDisplay}.]`
       // Get user's optional message/question
       const userMessage = (isListening ? transcribedText : manualTextInput).trim();
 
+      // ==================== TOKEN CHECK FOR ANALYZE SCREEN ====================
+      // Analyze screen costs 2 tokens
+      const savedTokenUser = localStorage.getItem(LS_USER_KEY);
+      if (savedTokenUser) {
+        try {
+          const tokenUser = JSON.parse(savedTokenUser);
+          const isLocalAdmin = tokenUser.role === 'admin' || tokenUser.role === 'super-admin' || tokenUser.tokens === -1;
+
+          if (!isLocalAdmin) {
+            const tokenCheck = await tokensClient.checkTokens(tokenUser._id);
+
+            console.log('🔍 Token check result (analyze screen):', tokenCheck);
+
+            if (!tokenCheck.canSendMessage && !tokenCheck.isAdmin && !tokenCheck.hasUnlimitedTokens) {
+              setShowOutOfTokensModal(true);
+              setIsAnalyzing(false);
+              console.log('❌ Out of tokens for analyze screen! Current:', tokenCheck.tokens);
+              return;
+            }
+
+            console.log('✅ Token check passed (analyze screen). Tokens remaining:', tokenCheck.tokens);
+          } else {
+            console.log('✅ Admin user detected - skipping token check for analyze screen');
+          }
+        } catch (error) {
+          console.error('❌ Failed to check tokens for analyze screen:', error);
+          // Don't block the request if token check fails - fail open
+        }
+      }
+
       try {
         // 1. Capture screen silently
         const screenshotBase64 = await ipcRenderer.invoke('capture-screen');
@@ -2783,12 +2814,36 @@ IMPORTANT RULES:
         
         // No need to navigate again - we already pre-navigated! ✅
         
-        await saveChatHistory(updatedHistoryAfterAnalysis);
+        await saveChatHistory(updatedHistoryAfterAnalysis, true); // skip token consumption — handled below
 
         // Clear other inputs but keep the extracted question visible
         setTranscribedText('');
         setCommittedText('');
         setInterimText('');
+
+        // ==================== CONSUME 3 TOKENS FOR ANALYZE SCREEN ====================
+        if (savedTokenUser) {
+          try {
+            const tokenUser = JSON.parse(savedTokenUser);
+            const isLocalAdmin = tokenUser.role === 'admin' || tokenUser.role === 'super-admin' || tokenUser.tokens === -1;
+            if (!isLocalAdmin) {
+              const consumeResult = await tokensClient.consumeTokens(tokenUser._id, 2);
+              if (consumeResult.success) {
+                console.log('✅ 2 tokens consumed for analyze screen! Remaining:', consumeResult.tokens);
+                const updatedUser = { ...tokenUser, tokens: consumeResult.tokens };
+                localStorage.setItem(LS_USER_KEY, JSON.stringify(updatedUser));
+                if (typeof window !== 'undefined' && (window as any).require) {
+                  const { ipcRenderer } = (window as any).require('electron');
+                  ipcRenderer.send('token-updated', consumeResult.tokens);
+                }
+              } else {
+                console.warn('⚠️ Token consumption failed for analyze screen:', consumeResult.message);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to consume tokens for analyze screen:', e);
+          }
+        }
 
       } catch (error: any) {
         console.error('Analysis error:', error);
