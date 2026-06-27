@@ -3484,6 +3484,141 @@ ${text}`;
           summary = data.choices?.[0]?.message?.content || '';
           console.log('✅ Groq summary generated, length:', summary.length);
 
+        } else if (currentProvider === 'grok') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Grok');
+            continue;
+          }
+          const response = await fetch(
+            'https://api.x.ai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+              body: JSON.stringify({
+                model: currentModel || 'grok-2-latest',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Grok API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
+        } else if (currentProvider === 'cerebras') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Cerebras');
+            continue;
+          }
+          const response = await fetch(
+            'https://api.cerebras.ai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+              body: JSON.stringify({
+                model: currentModel || 'cerebras-Llama-3.3-70B',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Cerebras API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
+        } else if (currentProvider === 'mistral') {
+          if (!currentKey) {
+            lastError = new Error('API key required for Mistral');
+            continue;
+          }
+          const response = await fetch(
+            'https://api.mistral.ai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+              body: JSON.stringify({
+                model: currentModel || 'mistral-large-latest',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Mistral API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
+        } else if (currentProvider === 'openrouter') {
+          if (!currentKey) {
+            lastError = new Error('API key required for OpenRouter');
+            continue;
+          }
+          const response = await fetch(
+            'https://openrouter.ai/api/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+              body: JSON.stringify({
+                model: currentModel || 'openai/gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`OpenRouter API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
+        } else if (currentProvider === 'openai-compatible') {
+          if (!currentKey) {
+            lastError = new Error('API key required for OpenAI Compatible');
+            continue;
+          }
+          const baseUrl = entry?.baseUrl;
+          if (!baseUrl) {
+            lastError = new Error('baseUrl is required for OpenAI Compatible provider');
+            continue;
+          }
+          const response = await fetch(
+            `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+              body: JSON.stringify({
+                model: currentModel || 'gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: 'You are a professional meeting assistant.' },
+                  { role: 'user', content: summaryPrompt }
+                ]
+              })
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`OpenAI Compatible API error: ${response.status} - ${JSON.stringify(errorData)}`);
+          }
+          const data = await response.json();
+          summary = data.choices?.[0]?.message?.content || '';
+
         } else {
           lastError = new Error(`Invalid API provider: ${currentProvider}`);
           if (chainEntries.length === 0) {
@@ -3561,7 +3696,7 @@ app.post('/api/generate-stream', async (req, res) => {
     let lastError = null;
     let chainEntries = [];
 
-    const doStream = async (provider, key, mdl, msgs) => {
+    const doStream = async (provider, key, mdl, msgs, baseUrl) => {
       let convertedMessages = msgs;
       if (provider === 'gemini') {
         convertedMessages = msgs.map((msg) => ({
@@ -3720,6 +3855,197 @@ app.post('/api/generate-stream', async (req, res) => {
             }
           }
         }
+      } else if (provider === 'grok') {
+        if (!key) throw new Error('API key required for Grok');
+        const response = await fetch(
+          'https://api.x.ai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'grok-2-latest', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Grok API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'cerebras') {
+        if (!key) throw new Error('API key required for Cerebras');
+        const response = await fetch(
+          'https://api.cerebras.ai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'cerebras-Llama-3.3-70B', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Cerebras API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'mistral') {
+        if (!key) throw new Error('API key required for Mistral');
+        const response = await fetch(
+          'https://api.mistral.ai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'mistral-large-latest', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`Mistral API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'openrouter') {
+        if (!key) throw new Error('API key required for OpenRouter');
+        const response = await fetch(
+          'https://openrouter.ai/api/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'openai/gpt-4o-mini', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`OpenRouter API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } else if (provider === 'openai-compatible') {
+        if (!key) throw new Error('API key required for OpenAI Compatible');
+        if (!baseUrl) throw new Error('baseUrl is required for OpenAI Compatible provider');
+        const response = await fetch(
+          `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({ model: mdl || 'gpt-4o-mini', messages: convertedMessages, stream: true, max_tokens: 4000 })
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.text();
+          throw new Error(`OpenAI Compatible API error: ${response.status} - ${errorData}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') continue;
+              if (!jsonStr) continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const text = data.choices?.[0]?.delta?.content || '';
+                if (text) {
+                  res.write(`data: ${JSON.stringify({ text })}\n\n`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
       } else {
         throw new Error(`Unsupported provider: ${provider}`);
       }
@@ -3808,7 +4134,7 @@ app.post('/api/generate-stream', async (req, res) => {
         res.write(`data: ${JSON.stringify({ provider: apiProvider, model: model || 'default', chainTriggered })}\n\n`);
 
         try {
-          await doStream(apiProvider, apiKey, model, messages);
+          await doStream(apiProvider, apiKey, model, messages, entry.baseUrl);
           // Streaming completed successfully
           res.write('data: [DONE]\n\n');
           res.end();
@@ -4005,6 +4331,118 @@ app.post('/api/analyze-screen', async (req, res) => {
           });
 
           if (!response.ok) throw new Error(`Groq API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'grok') {
+          if (!apiKey) { lastError = new Error('API key required for Grok'); continue; }
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+          const response = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'grok-2-vision', messages: msgs, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`Grok API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'cerebras') {
+          if (!apiKey) { lastError = new Error('API key required for Cerebras'); continue; }
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+          const response = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'cerebras-Llama-3.3-70B', messages: msgs, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`Cerebras API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'mistral') {
+          if (!apiKey) { lastError = new Error('API key required for Mistral'); continue; }
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+          const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'mistral-large-latest', messages: msgs, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`Mistral API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'openrouter') {
+          if (!apiKey) { lastError = new Error('API key required for OpenRouter'); continue; }
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'openai/gpt-4o-mini', messages: msgs, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`OpenRouter API error: ${response.status} - ${await response.text()}`);
+          const data = await response.json();
+          text = data.choices?.[0]?.message?.content || '';
+
+        } else if (apiProvider === 'openai-compatible') {
+          if (!apiKey) { lastError = new Error('API key required for OpenAI Compatible'); continue; }
+          const baseUrl = entry?.baseUrl;
+          if (!baseUrl) { lastError = new Error('baseUrl is required for OpenAI Compatible provider'); continue; }
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+          const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'gpt-4o-mini', messages: msgs, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`OpenAI Compatible API error: ${response.status} - ${await response.text()}`);
           const data = await response.json();
           text = data.choices?.[0]?.message?.content || '';
 

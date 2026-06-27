@@ -9,6 +9,7 @@ interface AIModel {
   model: string;
   order: number;
   identityName: string;
+  baseUrl?: string;
   active?: boolean;
 }
 
@@ -50,7 +51,8 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
   const [aiChain, setAiChain] = useState<AIModel[]>([]);
   const [deepgramChain, setDeepgramChain] = useState<DeepgramKey[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
+  const [savingDeepgram, setSavingDeepgram] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // AI Model form state
@@ -58,7 +60,8 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
     provider: '',
     apiKey: '',
     model: '',
-    identityName: ''
+    identityName: '',
+    baseUrl: ''
   });
   const [editingAiIndex, setEditingAiIndex] = useState<number | null>(null);
 
@@ -113,7 +116,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
   };
 
   const resetAiForm = () => {
-    setAiFormData({ provider: '', apiKey: '', model: '', identityName: '' });
+    setAiFormData({ provider: '', apiKey: '', model: '', identityName: '', baseUrl: '' });
     setEditingAiIndex(null);
   };
 
@@ -145,7 +148,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
       // Update existing entry
       const updated = aiChain.map((model, idx) =>
         idx === editingAiIndex
-          ? { ...model, provider: aiFormData.provider, apiKey: aiFormData.apiKey, model: aiFormData.model, identityName: aiFormData.identityName }
+          ? { ...model, provider: aiFormData.provider, apiKey: aiFormData.apiKey, model: aiFormData.model, identityName: aiFormData.identityName, baseUrl: aiFormData.baseUrl || undefined }
           : model
       );
       setAiChain(updated);
@@ -158,6 +161,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
         model: aiFormData.model,
         order: aiChain.length + 1,
         identityName: aiFormData.identityName,
+        baseUrl: aiFormData.baseUrl || undefined,
         active: true
       };
       setAiChain([...aiChain, newModel]);
@@ -172,9 +176,16 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
       provider: model.provider,
       apiKey: model.apiKey,
       model: model.model,
-      identityName: model.identityName || ''
+      identityName: model.identityName || '',
+      baseUrl: model.baseUrl || ''
     });
     setEditingAiIndex(index);
+  };
+
+  const toggleAiActive = (index: number) => {
+    setAiChain(aiChain.map((model, idx) =>
+      idx === index ? { ...model, active: !model.active } : model
+    ));
   };
 
   const removeAiModel = (index: number) => {
@@ -243,6 +254,12 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
     setEditingDeepgramIndex(index);
   };
 
+  const toggleDeepgramActive = (index: number) => {
+    setDeepgramChain(deepgramChain.map((key, idx) =>
+      idx === index ? { ...key, active: !key.active } : key
+    ));
+  };
+
   const removeDeepgramKey = (index: number) => {
     setDeepgramChain(deepgramChain.filter((_, i) => i !== index).map((key, idx) => ({
       ...key,
@@ -253,7 +270,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
 
   const saveAiChain = async () => {
     try {
-      setSaving(true);
+      setSavingAi(true);
       const userId = String(user._id || user.id || '');
       const res = await fetch(`${API_BASE_URL}/api/auth/super-admin/ai-chain`, {
         method: 'POST',
@@ -269,13 +286,13 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
     } catch (error) {
       setMessage({ type: 'error', text: 'Error saving AI chain: ' + error });
     } finally {
-      setSaving(false);
+      setSavingAi(false);
     }
   };
 
   const saveDeepgramChain = async () => {
     try {
-      setSaving(true);
+      setSavingDeepgram(true);
       const userId = String(user._id || user.id || '');
       const res = await fetch(`${API_BASE_URL}/api/auth/super-admin/deepgram-chain`, {
         method: 'POST',
@@ -291,7 +308,7 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
     } catch (error) {
       setMessage({ type: 'error', text: 'Error saving Deepgram chain: ' + error });
     } finally {
-      setSaving(false);
+      setSavingDeepgram(false);
     }
   };
 
@@ -556,6 +573,24 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                   }`}
                 />
               </div>
+              {aiFormData.provider === 'openai-compatible' && (
+                <div>
+                  <label className={`block text-sm font-bold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Base URL <span className="text-xs font-normal opacity-70">(e.g., https://api.my-custom-endpoint.com)</span>
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://api.example.com"
+                    value={aiFormData.baseUrl}
+                    onChange={(e) => setAiFormData({ ...aiFormData, baseUrl: e.target.value })}
+                    className={`w-full px-4 py-2 rounded border transition-colors ${
+                      isDarkMode
+                        ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                        : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-500'
+                    }`}
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={addAiModel}
@@ -579,12 +614,14 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
               {aiChain.length === 0 ? (
                 <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>No AI models configured yet</p>
               ) : (
-                aiChain.map((model, index) => (
+                  aiChain.map((model, index) => (
                   <div key={index} className={`p-3 rounded border flex items-center justify-between ${
                     isDarkMode
                       ? 'bg-slate-700/50 border-slate-600'
                       : 'bg-slate-100 border-slate-300'
-                  } ${editingAiIndex === index ? 'ring-2 ring-blue-500' : ''}`}>
+                  } ${editingAiIndex === index ? 'ring-2 ring-blue-500' : ''} ${
+                    model.active === false ? 'opacity-50' : ''
+                  }`}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${
@@ -604,6 +641,11 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                             {model.identityName}
                           </span>
                         )}
+                        {model.active === false && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/40 text-red-400 font-bold">
+                            DISABLED
+                          </span>
+                        )}
                       </div>
                       <p className={`text-sm truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                         Model: {model.model}
@@ -611,8 +653,24 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                       <p className={`text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                         Key: {model.apiKey.substring(0, 20)}...
                       </p>
+                      {model.baseUrl && (
+                        <p className={`text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                          Base URL: {model.baseUrl}
+                        </p>
+                      )}
                     </div>
                     <div className="flex gap-2 ml-2">
+                      <button
+                        onClick={() => toggleAiActive(index)}
+                        className={`px-3 py-1 rounded text-sm transition-colors ${
+                          model.active === false
+                            ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
+                            : 'bg-slate-600/20 hover:bg-slate-600/30 text-slate-400'
+                        }`}
+                        title={model.active === false ? 'Enable this entry' : 'Disable this entry'}
+                      >
+                        {model.active === false ? '◉' : '◎'}
+                      </button>
                       <button
                         onClick={() => startEditAiModel(index)}
                         className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded text-sm transition-colors"
@@ -654,10 +712,10 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
             {aiChain.length > 0 && (
               <button
                 onClick={saveAiChain}
-                disabled={saving}
+                disabled={savingAi}
                 className="w-full mt-6 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded font-bold transition-colors"
               >
-                {saving ? '💾 Saving...' : '💾 Save AI Model Chain'}
+                {savingAi ? '💾 Saving...' : '💾 Save AI Model Chain'}
               </button>
             )}
           </div>
@@ -750,7 +808,9 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                     isDarkMode
                       ? 'bg-slate-700/50 border-slate-600'
                       : 'bg-slate-100 border-slate-300'
-                  } ${editingDeepgramIndex === index ? 'ring-2 ring-blue-500' : ''}`}>
+                  } ${editingDeepgramIndex === index ? 'ring-2 ring-blue-500' : ''} ${
+                    key.active === false ? 'opacity-50' : ''
+                  }`}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${
@@ -770,12 +830,28 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
                             {key.identityName}
                           </span>
                         )}
+                        {key.active === false && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-800/40 text-red-400 font-bold">
+                            DISABLED
+                          </span>
+                        )}
                       </div>
                       <p className={`text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                         {key.provider === 'deepgram' ? `Key: ${key.apiKey.substring(0, 20)}...` : 'No API key required'}
                       </p>
                     </div>
                     <div className="flex gap-2 ml-2">
+                      <button
+                        onClick={() => toggleDeepgramActive(index)}
+                        className={`px-3 py-1 rounded text-sm transition-colors ${
+                          key.active === false
+                            ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
+                            : 'bg-slate-600/20 hover:bg-slate-600/30 text-slate-400'
+                        }`}
+                        title={key.active === false ? 'Enable this entry' : 'Disable this entry'}
+                      >
+                        {key.active === false ? '◉' : '◎'}
+                      </button>
                       <button
                         onClick={() => startEditDeepgramKey(index)}
                         className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded text-sm transition-colors"
@@ -817,10 +893,10 @@ const SuperAdminPage: React.FC<SuperAdminPageProps> = ({ user }) => {
             {deepgramChain.length > 0 && (
               <button
                 onClick={saveDeepgramChain}
-                disabled={saving}
+                disabled={savingDeepgram}
                 className="w-full mt-6 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded font-bold transition-colors"
               >
-                {saving ? '💾 Saving...' : '💾 Save Deepgram Chain'}
+                {savingDeepgram ? '💾 Saving...' : '💾 Save Deepgram Chain'}
               </button>
             )}
           </div>

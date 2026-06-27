@@ -2821,7 +2821,7 @@ IMPORTANT RULES:
         setCommittedText('');
         setInterimText('');
 
-        // ==================== CONSUME 3 TOKENS FOR ANALYZE SCREEN ====================
+        // ==================== CONSUME 2 TOKENS FOR ANALYZE SCREEN ====================
         if (savedTokenUser) {
           try {
             const tokenUser = JSON.parse(savedTokenUser);

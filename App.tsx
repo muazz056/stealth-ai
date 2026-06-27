@@ -3186,6 +3186,18 @@ Respond in ${langDisplay}.]`;
 
           {/* Generate Summaries Button + Manual Save */}
           <div className="mt-6 bg-slate-50/80 dark:bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 sm:p-5 space-y-3">
+            <div>
+                  <button
+                onClick={handleStoreRawKnowledgebase}
+                className="w-full px-6 py-3.5 rounded-xl font-bold text-sm transition-all duration-200 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-800/30 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-600/50 hover:border-amber-500 dark:hover:border-amber-500"
+                  >
+                Store Raw Knowledgebase
+                  </button>
+              {showRawKnowledgebaseSaved && (
+                <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Raw knowledgebase saved</div>
+              )}
+            </div>
+
                   <button 
               onClick={handleGenerateSummaries}
               disabled={isGeneratingSummaries}
@@ -3226,18 +3238,6 @@ Respond in ${langDisplay}.]`;
                   </button>
               {showManualSummarySaved && (
                 <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Summaries saved</div>
-              )}
-                </div>
-
-            <div className="pt-2">
-                  <button
-                onClick={handleStoreRawKnowledgebase}
-                className="w-full px-6 py-3 rounded-xl font-bold text-sm transition-all duration-200 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-800/30 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-600/50 hover:border-amber-500 dark:hover:border-amber-500"
-                  >
-                Store Raw Knowledgebase
-                  </button>
-              {showRawKnowledgebaseSaved && (
-                <div className="mt-2 text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Raw knowledgebase saved</div>
               )}
                 </div>
               </div>
