@@ -32,8 +32,9 @@ export default defineConfig(({ mode }) => {
     
     // Backend URL: check VITE_BACKEND_URL first (what Vercel has), then API_BACKEND_URL, then localhost
     const backendUrl = env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
+    const frontendUrl = env.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
     
-    console.log(`Building for ${mode}, backend: ${backendUrl}`);
+    console.log(`Building for ${mode}, backend: ${backendUrl}, frontend: ${frontendUrl}`);
     
     return {
       base: './',
@@ -50,6 +51,12 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.PROD': JSON.stringify(mode === 'production'),
         'import.meta.env.VITE_BACKEND_URL': JSON.stringify(backendUrl),
         'import.meta.env.VITE_API_URL': JSON.stringify(backendUrl + '/api'),
+        'import.meta.env.VITE_FRONTEND_URL': JSON.stringify(frontendUrl),
+        'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(env.VITE_GOOGLE_CLIENT_ID || ''),
+        'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(env.VITE_DOWNLOAD_WINDOWS || ''),
+        'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(env.VITE_DOWNLOAD_MAC || ''),
+        'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(env.VITE_DOWNLOAD_LINUX || ''),
+        'import.meta.env.VITE_APP_NAME': JSON.stringify(env.VITE_APP_NAME || ''),
       },
       resolve: {
         alias: {
