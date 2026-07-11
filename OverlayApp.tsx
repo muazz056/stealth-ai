@@ -4400,7 +4400,7 @@ ${companyInfoSummary}`;
           label: 'Upgrade Plan',
           onClick: () => {
             setShowOutOfTokensModal(false);
-            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
+            window.open('https://stealth-assist-ai.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{
@@ -4429,7 +4429,7 @@ ${companyInfoSummary}`;
           label: 'Upgrade Plan',
           onClick: () => {
             setShowUpgradeModal(false);
-            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
+            window.open('https://stealth-assist-ai.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{

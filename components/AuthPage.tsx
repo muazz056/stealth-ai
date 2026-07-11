@@ -589,12 +589,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               <p className="text-xs text-slate-500 dark:text-slate-500">
                 To create an account, please visit{' '}
                 <a
-                  href={import.meta.env.VITE_FRONTEND_URL || 'https://stealth-ai-sand.vercel.app'}
+                  href={import.meta.env.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                 >
-                  {import.meta.env.VITE_FRONTEND_URL?.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'stealth-ai-sand.vercel.app'}
+                  {import.meta.env.VITE_FRONTEND_URL?.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'stealth-assist-ai.vercel.app'}
                 </a>
               </p>
             </div>

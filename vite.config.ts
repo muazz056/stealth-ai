@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { defineConfig, loadEnv, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -30,9 +31,25 @@ function spaFallbackPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // Backend URL: check VITE_BACKEND_URL first (what Vercel has), then API_BACKEND_URL, then localhost
-    const backendUrl = env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
-    const frontendUrl = env.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
+    // Read .env file directly (bypass system env vars that might override)
+    let dotEnvVars: Record<string, string> = {};
+    try {
+      const dotEnvPath = path.resolve('.env');
+      if (fs.existsSync(dotEnvPath)) {
+        const dotEnvContent = fs.readFileSync(dotEnvPath, 'utf-8');
+        for (const line of dotEnvContent.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx === -1) continue;
+          dotEnvVars[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Use .env file values (they represent the user's intent), fallback to env/loadEnv
+    const backendUrl = dotEnvVars.VITE_BACKEND_URL || dotEnvVars.API_BACKEND_URL || env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
+    const frontendUrl = dotEnvVars.VITE_FRONTEND_URL || env.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
     
     console.log(`Building for ${mode}, backend: ${backendUrl}, frontend: ${frontendUrl}`);
     

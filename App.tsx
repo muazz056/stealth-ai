@@ -3704,7 +3704,7 @@ Respond in ${langDisplay}.]`;
           label: 'Upgrade Plan',
           onClick: () => {
             setShowOutOfTokensModal(false);
-            window.open('https://stealth-ai-sand.vercel.app/#/pricing', '_blank');
+            window.open('https://stealth-assist-ai.vercel.app/#/pricing', '_blank');
           }
         }}
         secondaryAction={{
