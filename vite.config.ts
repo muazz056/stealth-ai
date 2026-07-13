@@ -31,25 +31,41 @@ function spaFallbackPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // Read .env file directly (bypass system env vars that might override)
-    let dotEnvVars: Record<string, string> = {};
-    try {
-      const dotEnvPath = path.resolve('.env');
-      if (fs.existsSync(dotEnvPath)) {
-        const dotEnvContent = fs.readFileSync(dotEnvPath, 'utf-8');
-        for (const line of dotEnvContent.split('\n')) {
+    // Helper to read an env file directly (bypasses process.env)
+    const readEnvFile = (filename: string): Record<string, string> => {
+      const result: Record<string, string> = {};
+      try {
+        const content = fs.readFileSync(path.resolve(filename), 'utf-8');
+        for (const line of content.split('\n')) {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith('#')) continue;
           const eqIdx = trimmed.indexOf('=');
           if (eqIdx === -1) continue;
-          dotEnvVars[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+          result[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
         }
-      }
-    } catch { /* ignore */ }
+      } catch { /* ignore */ }
+      return result;
+    };
 
-    // Use .env file values (they represent the user's intent), fallback to env/loadEnv
-    const backendUrl = dotEnvVars.VITE_BACKEND_URL || dotEnvVars.API_BACKEND_URL || env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
-    const frontendUrl = dotEnvVars.VITE_FRONTEND_URL || env.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
+    // Production builds: read .env + .env.production directly, bypassing system env.
+    // Dev mode: use loadEnv (system env vars are fine for local development).
+    let backendUrl: string;
+    let frontendUrl: string;
+    let allVars: Record<string, string>;
+
+    if (mode === 'production') {
+      const baseEnv = readEnvFile('.env');
+      const prodEnv = readEnvFile('.env.production');
+      // Merge: prod overrides base
+      allVars = { ...baseEnv, ...prodEnv };
+      backendUrl = allVars.VITE_BACKEND_URL || allVars.API_BACKEND_URL || 'http://localhost:3001';
+      frontendUrl = allVars.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
+    } else {
+      // Dev mode: includes .env + system env (system env wins, which is correct for local dev)
+      allVars = { ...env };
+      backendUrl = env.VITE_BACKEND_URL || env.API_BACKEND_URL || 'http://localhost:3001';
+      frontendUrl = env.VITE_FRONTEND_URL || 'http://localhost:5173';
+    }
     
     console.log(`Building for ${mode}, backend: ${backendUrl}, frontend: ${frontendUrl}`);
     
@@ -69,11 +85,11 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.VITE_BACKEND_URL': JSON.stringify(backendUrl),
         'import.meta.env.VITE_API_URL': JSON.stringify(backendUrl + '/api'),
         'import.meta.env.VITE_FRONTEND_URL': JSON.stringify(frontendUrl),
-        'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(env.VITE_GOOGLE_CLIENT_ID || ''),
-        'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(env.VITE_DOWNLOAD_WINDOWS || ''),
-        'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(env.VITE_DOWNLOAD_MAC || ''),
-        'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(env.VITE_DOWNLOAD_LINUX || ''),
-        'import.meta.env.VITE_APP_NAME': JSON.stringify(env.VITE_APP_NAME || ''),
+        'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(allVars.VITE_GOOGLE_CLIENT_ID || env.VITE_GOOGLE_CLIENT_ID || ''),
+        'import.meta.env.VITE_DOWNLOAD_WINDOWS': JSON.stringify(allVars.VITE_DOWNLOAD_WINDOWS || env.VITE_DOWNLOAD_WINDOWS || ''),
+        'import.meta.env.VITE_DOWNLOAD_MAC': JSON.stringify(allVars.VITE_DOWNLOAD_MAC || env.VITE_DOWNLOAD_MAC || ''),
+        'import.meta.env.VITE_DOWNLOAD_LINUX': JSON.stringify(allVars.VITE_DOWNLOAD_LINUX || env.VITE_DOWNLOAD_LINUX || ''),
+        'import.meta.env.VITE_APP_NAME': JSON.stringify(allVars.VITE_APP_NAME || env.VITE_APP_NAME || ''),
       },
       resolve: {
         alias: {
@@ -85,4 +101,4 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       }
     };
-});
+  });

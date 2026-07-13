@@ -3645,9 +3645,37 @@ ${companyInfoSummary}`;
           </div>
           
           {isGenerating || isAnalyzing ? (
-            <div className="flex items-center gap-2 text-gray-400">
-              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-              {isAnalyzing ? 'Analyzing screen...' : 'Generating...'}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-gray-400">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                {isAnalyzing ? 'Analyzing screen...' : 'Generating...'}
+              </div>
+              {!isAnalyzing && aiResponse && (
+                <div className="markdown-content text-white text-sm leading-relaxed">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+                    rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
+                    components={{
+                      h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
+                      h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
+                      h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
+                      p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                      ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                      ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                      li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                      code: CodeBlock,
+                      pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                      a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                      strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                      em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                      blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                      hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                    }}
+                  >
+                    {aiResponse}
+                  </ReactMarkdown>
+                </div>
+              )}
             </div>
           ) : qaPairs.length > 0 && qaPairs[currentPairIndex] ? (
             <div className="space-y-3">
