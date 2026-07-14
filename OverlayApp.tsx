@@ -222,7 +222,6 @@ const LS_CHAT_HISTORY_KEY = 'isa_chat_history';
 const LS_USER_KEY = 'isa_current_user';
 const LS_API_KEYS = 'isa_api_keys';
 const LS_API_PROVIDER = 'isa_api_provider';
-const LS_ANALYZED_QUESTIONS_KEY = 'isa_analyzed_questions';
 const QUERY_BACKEND_URL = typeof window !== 'undefined'
   ? new URLSearchParams(window.location.search).get('backendUrl')
   : null;
@@ -314,10 +313,6 @@ const OverlayApp: React.FC = () => {
   const [currentLanguage, setCurrentLanguage] = useState<string>('multi');
   const [currentKeyterms, setCurrentKeyterms] = useState<string>('');
   const [overlayUserSettings, setOverlayUserSettings] = useState<any>({});
-  const [analyzedQuestions, setAnalyzedQuestions] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(LS_ANALYZED_QUESTIONS_KEY) || '[]'); }
-    catch { return []; }
-  });
   
   // Browser mode state
   const [browserMode, setBrowserMode] = useState(false);
@@ -865,9 +860,6 @@ const OverlayApp: React.FC = () => {
           // Clear chat history
           localStorage.removeItem(LS_CHAT_HISTORY_KEY);
           setChatHistory([]);
-          localStorage.removeItem(LS_ANALYZED_QUESTIONS_KEY);
-          setAnalyzedQuestions([]);
-          
           // Clear Q&A state
           setManualTextInput('');
           setTranscribedText('');
@@ -1461,12 +1453,6 @@ const OverlayApp: React.FC = () => {
   useEffect(() => {
     manualTextInputRef.current = manualTextInput;
   }, [manualTextInput]);
-
-  // Persist analyzed questions
-  useEffect(() => {
-    try { localStorage.setItem(LS_ANALYZED_QUESTIONS_KEY, JSON.stringify(analyzedQuestions)); }
-    catch {}
-  }, [analyzedQuestions]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -2580,6 +2566,8 @@ Respond in ${langDisplay}.]`
   const handleAnalyzeScreen = async () => {
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
+      const TIMER_START = Date.now();
+      console.log('[TIMER] Analyze screen START');
       
       // If BrowseAI is enabled, attach screenshot to AI provider
       if (browserMode && browseAIEnabled) {
@@ -2634,11 +2622,13 @@ Respond in ${langDisplay}.]`
           // Don't block the request if token check fails - fail open
         }
       }
+      console.log('[TIMER] Token check done:', Date.now() - TIMER_START, 'ms');
 
       try {
         // 1. Capture screen silently
         const screenshotBase64 = await ipcRenderer.invoke('capture-screen');
         if (!screenshotBase64) throw new Error('Capture failed');
+        console.log('[TIMER] Screen capture done:', Date.now() - TIMER_START, 'ms');
 
         // 2. Prepare for API
         const base64Data = screenshotBase64.split(',')[1];
@@ -2663,23 +2653,22 @@ Respond in ${langDisplay}.]`
 TASK:
 1. Look at the screenshot below and extract ALL questions visible on screen
 2. List them in order from top to bottom as they appear
-3. The following questions have ALREADY been answered in previous rounds — SKIP them:
-${analyzedQuestions.length > 0 ? analyzedQuestions.map((q, i) => `   ${i + 1}. "${q}"`).join('\n') : '   (none yet)'}
-4. Answer ONLY questions that are NOT in the skip list above
-5. If only one question needs answering, just answer it
-6. If multiple questions need answering, answer ALL of them
+3. Check the Prior Q&A context below — any question EXACTLY matching a previous Q&A is already answered. SKIP those.
+4. Only output QUESTION:/ANSWER: for questions NOT in the Prior Q&A context
+5. If only one new question needs answering, just answer it
+6. If multiple new questions need answering, answer ALL of them
 
 OUTPUT FORMAT (use EXACTLY this):
-ALL_QUESTIONS: [comma-separated list of every question visible, top to bottom]
+ALL_QUESTIONS: [comma-separated list of EVERY question visible, top to bottom]
 
-Then for each unanswered question, repeat this block:
+Then for each NEW/unanswered question, repeat this block:
 QUESTION: [the exact question text]
 ANSWER: [your detailed answer]
 
-Prior Q&A context (for follow-up reference only):
+Prior Q&A context (questions already answered — SKIP exact matches):
 ${
   chatHistory && chatHistory.length > 0
-    ? chatHistory.slice(-4).map(m => {
+    ? chatHistory.slice(-8).map(m => {
         const role = m.role === 'user' ? 'User' : 'Assistant';
         const text = m.content || m.parts?.[0]?.text || '';
         return `${role}: ${text}`;
@@ -2694,16 +2683,15 @@ ${userMessage ? `\nUser's Specific Question (use as clue to find the right quest
 
 IMPORTANT RULES:
 - The SCREENSHOT is the PRIMARY source — extract all questions from it
-- Prior Q&A context above is ONLY for follow-up understanding, NOT for re-answering old questions
 - ALL_QUESTIONS must include EVERY question visible, not just the ones you're answering
-- CRITICAL: You MUST NOT output QUESTION:/ANSWER: for any question in the skip list. Only output QUESTION:/ANSWER: for questions NOT in the skip list
-- When checking if a question is already answered, compare EXACT wording — if even slightly different or reworded, treat it as NEW and answer it
-- If ALL questions have already been answered word-for-word, return "ALL_QUESTIONS: [all visible]" and "ANSWER: All questions on screen have been answered."
+- CRITICAL: Only output QUESTION:/ANSWER: for questions NOT already present in Prior Q&A context. Skip exact-matching questions entirely.
+- When checking if a question is already answered in Prior Q&A, compare EXACT wording — if even slightly different or reworded, treat it as NEW and answer it
+- If ALL visible questions have already been answered word-for-word, return "ALL_QUESTIONS: [all visible]" and "ANSWER: All questions on screen have been answered."
 - Respond in ${responseLanguage}`;
 
         // Send to backend which uses system chain to determine provider
-        console.log('📸 Sending screen analysis to backend...');
-        const response = await fetch(`${API_BASE_URL}/api/analyze-screen`, {
+        console.log('📸 Sending screen analysis to backend (streaming)...');
+        const response = await fetch(`${API_BASE_URL}/api/analyze-screen-stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2714,21 +2702,66 @@ IMPORTANT RULES:
         });
 
         if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || `API error: ${response.status}`);
+          const errText = await response.text();
+          throw new Error(errText || `API error: ${response.status}`);
         }
+        console.log('[TIMER] Stream API response received:', Date.now() - TIMER_START, 'ms');
 
-        const data = await response.json();
-        const text = data.text || 'No content found to analyze.';
+        // Read streaming response (SSE)
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+        let streamChainTriggered = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6).trim();
+              if (data === '[DONE]') continue;
+              if (!data) continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.error) throw new Error(parsed.error);
+                if (parsed.chainTriggered) streamChainTriggered = true;
+                if (parsed.text) {
+                  fullText += parsed.text;
+                  // Strip ALL_QUESTIONS:, QUESTION:, ANSWER: labels for clean display
+                  const cleanDisplay = fullText
+                    .replace(/^ALL_QUESTIONS:.*$/m, '')
+                    .replace(/^QUESTION:\s*/gm, '')
+                    .replace(/^ANSWER:\s*/gm, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+                  setAiResponse(cleanDisplay || 'Generating...'); // Stream text incrementally
+                }
+              } catch (e) {
+                if (e instanceof Error && e.message !== 'Unexpected end of JSON input') throw e;
+              }
+            }
+          }
+        }
+        console.log('[TIMER] Streaming complete, total chars:', fullText.length, ', total:', Date.now() - TIMER_START, 'ms');
+
+        const text = fullText || 'No content found to analyze.';
 
         // Show chain triggered alert if fallback occurred
-        if (data.chainTriggered) {
+        if (streamChainTriggered) {
           if (chainAlertTimerRef.current) clearTimeout(chainAlertTimerRef.current);
           setChainAlert(true);
           chainAlertTimerRef.current = setTimeout(() => setChainAlert(false), 2000);
         }
 
-        // Parse all Q&A pairs from response
+        // Parse all Q&A pairs from complete response
         const qaPairs: Array<{question: string, answer: string}> = [];
         const blocks = text.split(/\n(?=QUESTION:\s*)/i);
         let allQuestions: string[] = [];
@@ -2751,50 +2784,38 @@ IMPORTANT RULES:
           }
         }
 
-        // CLIENT-SIDE FILTER: Remove Q&A pairs whose questions are already answered
-        // This is the authoritative filter — even if the AI ignores skip instructions
-        const unansweredPairs = qaPairs.filter(pair =>
-          !analyzedQuestions.some(aq => aq.toLowerCase() === pair.question.toLowerCase())
-        );
-
-        // Build display from unanswered (new/changed) Q&A pairs only
+        // Build display — AI handles skipping already-answered questions via prompt
         let extractedQuestion = '';
         let displayText = text;
 
-        if (unansweredPairs.length > 0) {
-          if (unansweredPairs.length > 1) {
-            extractedQuestion = unansweredPairs[0].question;
-            const questionsHeader = unansweredPairs.map(p => p.question).join(', ');
-            displayText = `**Questions:** ${questionsHeader}\n\n---\n\n` +
-              unansweredPairs.map((pair, i) =>
-                `**Q${i + 1}:** ${pair.question}\n\n**A${i + 1}:** ${pair.answer}`
-              ).join('\n\n---\n\n');
+        if (qaPairs.length > 0) {
+          if (qaPairs.length > 1) {
+            extractedQuestion = qaPairs[0].question;
+            displayText = qaPairs.map((pair, i) =>
+              `**Q${i + 1}:** ${pair.question}\n\n**A${i + 1}:** ${pair.answer}`
+            ).join('\n\n---\n\n');
           } else {
-            extractedQuestion = unansweredPairs[0].question;
-            displayText = unansweredPairs[0].answer;
+            extractedQuestion = qaPairs[0].question;
+            displayText = qaPairs[0].answer;
           }
         } else {
-          // No new Q&A pairs — try lone ANSWER: (e.g. "all answered" case)
+          // No Q&A pairs — try lone ANSWER: (e.g. "all answered" case)
           const loneAnswer = text.match(/^ANSWER:\s*([\s\S]*)/im);
           if (loneAnswer) {
             displayText = loneAnswer[1].trim();
+          } else {
+            // Fallback: strip ALL_QUESTIONS: and labels, show content
+            displayText = text
+              .replace(/^ALL_QUESTIONS:.*$/m, '')
+              .replace(/^QUESTION:\s*/gm, '')
+              .replace(/^ANSWER:\s*/gm, '')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim() || 'All questions on screen have been answered.';
           }
           extractedQuestion = allQuestions.length > 0 ? allQuestions.join(', ') : '';
         }
 
-        // Track all newly answered questions (only the ones we're displaying)
-        const newAnswered = unansweredPairs.map(p => p.question);
-        if (newAnswered.length > 0 || allQuestions.length > 0) {
-          setAnalyzedQuestions(prev => {
-            const combined = new Set<string>();
-            prev.forEach(q => combined.add(q));
-            // Add newly answered questions
-            newAnswered.forEach(q => combined.add(q));
-            // Add ALL questions from screen (for exact-wording comparison next round)
-            allQuestions.forEach(q => combined.add(q));
-            return Array.from(combined);
-          });
-        }
+        console.log('[TIMER] Parsing/filter done, total:', Date.now() - TIMER_START, 'ms');
 
         setAiResponse(displayText);
         if (extractedQuestion) {
@@ -2802,6 +2823,7 @@ IMPORTANT RULES:
         } else {
           setManualTextInput('');
         }
+        console.log('[TIMER] UI updated, total:', Date.now() - TIMER_START, 'ms');
 
         // Save chat history with extracted question as the user message
         const historyLabel = extractedQuestion || (userMessage ? `[Screen Analysis: "${userMessage}"]` : '[Analyzed Screen]');
@@ -2938,11 +2960,14 @@ IMPORTANT RULES:
   };
 
   const handleAnalyzeScreenForBrowser = async () => {
+    const TIMER_START = Date.now();
+    console.log('[TIMER] Browser analyze screen START');
     if (typeof window !== 'undefined' && (window as any).require) {
       const { ipcRenderer } = (window as any).require('electron');
       try {
         const result = await ipcRenderer.invoke('analyze-screen');
         if (result.success) {
+          console.log('[TIMER] Browser screenshot done:', Date.now() - TIMER_START, 'ms');
           console.log('✅ Screenshot attached to AI provider');
         } else {
           console.error('❌ Failed to attach screenshot:', result.error);
@@ -3650,7 +3675,7 @@ ${companyInfoSummary}`;
                 <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
                 {isAnalyzing ? 'Analyzing screen...' : 'Generating...'}
               </div>
-              {!isAnalyzing && aiResponse && (
+              {aiResponse && (
                 <div className="markdown-content text-white text-sm leading-relaxed">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}

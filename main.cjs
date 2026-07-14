@@ -2875,17 +2875,21 @@ ipcMain.handle('clipboard-write', async (event, text) => {
 });
 
 ipcMain.handle('capture-screen', async () => {
+    const T = Date.now();
     try {
         console.log('Capturing screen...');
         const sources = await desktopCapturer.getSources({ 
             types: ['screen'], 
-            thumbnailSize: { width: 1920, height: 1080 } 
+            thumbnailSize: { width: 960, height: 540 } 
         });
+        console.log('[TIMER] desktopCapturer.getSources done:', Date.now() - T, 'ms');
         
         // Find primary screen or use the first one
         const primarySource = sources[0]; 
         if (primarySource) {
-            return primarySource.thumbnail.toDataURL();
+            const result = primarySource.thumbnail.toDataURL();
+            console.log('[TIMER] thumbnail.toDataURL done, total:', Date.now() - T, 'ms');
+            return result;
         }
         throw new Error('No screen source found');
     } catch (error) {

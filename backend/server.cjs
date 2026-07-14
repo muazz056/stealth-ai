@@ -4471,6 +4471,247 @@ app.post('/api/analyze-screen', async (req, res) => {
   }
 });
 
+// Streaming screen analysis (SSE) - returns tokens as they arrive
+app.post('/api/analyze-screen-stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const writeEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const writeDone = () => { res.write('data: [DONE]\n\n'); res.end(); };
+
+  try {
+    const { image, messages, prompt } = req.body;
+    if (!image) { writeEvent({ error: 'Missing image data' }); writeDone(); return; }
+
+    const recentMessages = (messages || []).slice(-4);
+    let chainEntries = [];
+    try {
+      const database = await connectDB();
+      const config = database.collection('app_config');
+      const chainDoc = await config.findOne({ _id: 'ai_model_chain' });
+      if (chainDoc?.chain) chainEntries = chainDoc.chain.filter(e => e && e.active !== false);
+    } catch (chainErr) { console.error('Failed to read system AI chain:', chainErr.message); }
+
+    if (chainEntries.length === 0) { writeEvent({ error: 'No active AI model configured' }); writeDone(); return; }
+
+    let chainTriggered = false;
+    let lastError = null;
+
+    for (let i = 0; i < chainEntries.length; i++) {
+      const entry = chainEntries[i];
+      if (i > 0) chainTriggered = true;
+      const apiProvider = entry.provider;
+      const apiKey = entry.apiKey;
+      const model = entry.model;
+
+      if (!apiKey) { lastError = new Error(`No API key for ${apiProvider}`); continue; }
+      if (chainTriggered) console.log(`⚠️ Chain fallback to ${apiProvider} / ${model || 'default model'}`);
+      console.log(`🔐 Screen analyze streaming using ${apiProvider} / ${model || 'default model'}`);
+
+      try {
+        if (apiProvider === 'gemini') {
+          const contents = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: msg.content || msg.parts?.[0]?.text || '' }]
+          }));
+          contents.push({
+            role: 'user',
+            parts: [
+              { text: prompt || 'Analyze this screenshot' },
+              { inline_data: { mime_type: 'image/png', data: image } }
+            ]
+          });
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${apiKey}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
+          );
+          if (!response.ok) throw new Error(`Gemini API error: ${response.status} - ${await response.text()}`);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const jsonStr = line.slice(6).trim();
+                if (jsonStr === '[DONE]') continue;
+                try {
+                  const d = JSON.parse(jsonStr);
+                  const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                  if (text) writeEvent({ text });
+                } catch (e) {}
+              }
+            }
+          }
+
+        } else if (['openai', 'groq', 'mistral', 'cerebras', 'openrouter', 'openai-compatible'].includes(apiProvider)) {
+          let baseUrl = 'https://api.openai.com/v1';
+          let modelName = model || 'gpt-4o-mini';
+          if (apiProvider === 'groq') { baseUrl = 'https://api.groq.com/openai/v1'; modelName = model || 'meta-llama/llama-4-scout-17b-16e-instruct'; }
+          else if (apiProvider === 'mistral') { baseUrl = 'https://api.mistral.ai/v1'; modelName = model || 'mistral-large-latest'; }
+          else if (apiProvider === 'cerebras') { baseUrl = 'https://api.cerebras.ai/v1'; modelName = model || 'llama3.1-8b'; }
+          else if (apiProvider === 'openrouter') { baseUrl = 'https://openrouter.ai/api/v1'; modelName = model || 'openai/gpt-4o-mini'; }
+          else if (apiProvider === 'openai-compatible') { baseUrl = entry.baseUrl; modelName = model || 'gpt-4o-mini'; }
+
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+
+          const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: modelName, messages: msgs, stream: true, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`${apiProvider} API error: ${response.status} - ${await response.text()}`);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const jsonStr = line.slice(6).trim();
+                if (jsonStr === '[DONE]') continue;
+                try {
+                  const d = JSON.parse(jsonStr);
+                  const text = d.choices?.[0]?.delta?.content || '';
+                  if (text) writeEvent({ text });
+                } catch (e) {}
+              }
+            }
+          }
+
+        } else if (apiProvider === 'claude') {
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } },
+              { type: 'text', text: prompt || 'Analyze this screenshot' }
+            ]
+          });
+
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: model || 'claude-3-5-sonnet-20241022', messages: msgs, max_tokens: 4000, stream: true })
+          });
+          if (!response.ok) throw new Error(`Claude API error: ${response.status} - ${await response.text()}`);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const d = JSON.parse(line.slice(6));
+                  if (d.type === 'content_block_delta' && d.delta?.text) {
+                    writeEvent({ text: d.delta.text });
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+
+        } else if (apiProvider === 'grok') {
+          const msgs = recentMessages.map((msg) => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content || msg.parts?.[0]?.text || ''
+          }));
+          msgs.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt || 'Analyze this screenshot' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }
+            ]
+          });
+
+          const response = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: model || 'grok-2-vision', messages: msgs, stream: true, max_tokens: 4000 })
+          });
+          if (!response.ok) throw new Error(`Grok API error: ${response.status} - ${await response.text()}`);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const jsonStr = line.slice(6).trim();
+                if (jsonStr === '[DONE]') continue;
+                try {
+                  const d = JSON.parse(jsonStr);
+                  const text = d.choices?.[0]?.delta?.content || '';
+                  if (text) writeEvent({ text });
+                } catch (e) {}
+              }
+            }
+          }
+
+        } else {
+          lastError = new Error(`Unsupported provider for streaming: ${apiProvider}`);
+          continue;
+        }
+
+        writeEvent({ chainTriggered });
+        writeDone();
+        return;
+
+      } catch (error) {
+        lastError = error;
+        console.log(`⚠️ Provider ${apiProvider} failed (${error.message}), trying next in chain...`);
+        continue;
+      }
+    }
+
+    writeEvent({ error: lastError?.message || 'All AI providers failed' });
+    writeDone();
+
+  } catch (error) {
+    console.error('❌ Screen analyze stream error:', error);
+    writeEvent({ error: error.message });
+    writeDone();
+  }
+});
+
 // ==================== DEEPGRAM WEBSOCKET PROXY ====================
 const { WebSocketServer, WebSocket } = require('ws');
 const deepgramWss = new WebSocketServer({ noServer: true });
