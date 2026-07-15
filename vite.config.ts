@@ -56,8 +56,8 @@ export default defineConfig(({ mode }) => {
     if (mode === 'production') {
       const baseEnv = readEnvFile('.env');
       const prodEnv = readEnvFile('.env.production');
-      // Merge: prod overrides base
-      allVars = { ...baseEnv, ...prodEnv };
+      // Priority: Vercel dashboard (env) > .env.production > .env
+      allVars = { ...baseEnv, ...prodEnv, ...env };
       backendUrl = allVars.VITE_BACKEND_URL || allVars.API_BACKEND_URL || 'http://localhost:3001';
       frontendUrl = allVars.VITE_FRONTEND_URL || 'https://stealth-assist-ai.vercel.app';
     } else {
