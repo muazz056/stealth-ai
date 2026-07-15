@@ -304,9 +304,13 @@ if (!MONGO_URI) {
 
 const DB_NAME = 'interview_assistant';
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const CORS_ORIGINS = process.env.CORS_ORIGINS 
-  ? process.env.CORS_ORIGINS.split(',') 
-  : ['http://localhost:5173', 'http://localhost:3001'];
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim().replace(/^"+|"+$/g, '').replace(/\/+$/, ''))
+  .filter(Boolean);
+if (CORS_ORIGINS.length === 0) {
+  CORS_ORIGINS.push('http://localhost:5173', 'http://localhost:3001', 'https://stealth-assist-ai.vercel.app');
+}
 
 console.log('🌐 CORS_ORIGINS:', CORS_ORIGINS);
 
@@ -316,14 +320,12 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or Electron)
     if (!origin) return callback(null, true);
     
-    // Remove trailing slash for comparison
-    const originClean = origin.replace(/\/$/, '');
-    const allowedOrigins = CORS_ORIGINS.map(o => o.replace(/\/$/, ''));
+    const originClean = origin.replace(/\/+$/, '');
     
-    if (allowedOrigins.includes(originClean) || NODE_ENV === 'development') {
+    if (CORS_ORIGINS.includes(originClean) || NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      console.log('❌ CORS blocked:', origin, 'not in:', allowedOrigins);
+      console.log('❌ CORS blocked:', JSON.stringify(origin), 'not in:', JSON.stringify(CORS_ORIGINS));
       callback(new Error('Not allowed by CORS'));
     }
   },
