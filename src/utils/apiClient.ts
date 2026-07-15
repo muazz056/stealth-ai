@@ -106,6 +106,25 @@ export async function refreshAccessToken(): Promise<boolean> {
   }
 }
 
+// Helper: fetch with timeout + retry on network errors
+async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delayMs = 3000): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      // Network error — wait and retry (handles Railway cold start)
+      console.warn(`[apiClient] Retry ${attempt}/${retries - 1} for ${url}:`, (err as Error)?.message);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error('Failed to fetch');
+}
+
 // Main fetch wrapper
 export async function apiClient(
   path: string,
@@ -136,10 +155,7 @@ export async function apiClient(
     }
   }
 
-  let response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  let response = await fetchWithRetry(url, { ...options, headers });
 
   // If 401 (token expired), try to refresh
   if (response.status === 401) {

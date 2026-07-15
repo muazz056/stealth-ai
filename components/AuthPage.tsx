@@ -136,8 +136,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         setError(result.message || 'Google login failed');
       }
     } catch (err: any) {
-      setError('Google login failed: ' + err.message);
-      console.error('Google auth error:', err);
+      alert(`DEBUG GOOGLE ERROR\n\nType: ${err.name}\nMessage: ${err.message}\nAPI URL: ${API_CONFIG.API_URL || API_CONFIG.BASE_URL + '/api'}\nCause: ${err.cause || 'none'}`);
+      setError(`Google login failed: ${err.name === 'TypeError' ? 'Cannot reach server' : err.message}`);
     } finally {
       setLoading(false);
     }
@@ -256,8 +256,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         }
       }
     } catch (err: any) {
-      setError('Authentication failed: ' + err.message);
-      console.error('Auth error:', err);
+      const apiUrl = API_CONFIG.API_URL || API_CONFIG.BASE_URL + '/api';
+      alert(`DEBUG LOGIN ERROR\n\nType: ${err.name}\nMessage: ${err.message}\nAPI URL: ${apiUrl}\nCause: ${err.cause || 'none'}`);
+      setError(`Authentication failed: ${err.name === 'TypeError' ? 'Cannot reach server' : err.message}`);
     } finally {
       setLoading(false);
     }
