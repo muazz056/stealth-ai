@@ -14,7 +14,8 @@ export type ShortcutAction =
   | 'stopOrClear'
   | 'toggleBrowseAI'
   | 'toggleTranscription'
-  | 'stopGeneration';
+  | 'stopGeneration'
+  | 'toggleNotes';
 
 export interface ShortcutConfig {
   action: ShortcutAction;
@@ -122,6 +123,13 @@ export const getDefaultShortcuts = (): ShortcutsState => {
       description: 'Stop the current AI generation',
       defaultKey: 'Escape',
       modifier: 'Alt',
+    },
+    toggleNotes: {
+      action: 'toggleNotes',
+      label: 'Toggle Notes',
+      description: 'Show or hide notes in the overlay',
+      defaultKey: 'N',
+      modifier: 'Control',
     }
   };
 };

@@ -361,6 +361,11 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
   const [companyInfo, setCompanyInfo] = useState(
     user.settings?.companyInfo || ''
   );
+  const [notesContent, setNotesContent] = useState(
+    user.settings?.notesContent || localStorage.getItem('isa_notes_content') || ''
+  );
+  const [showNotesSaved, setShowNotesSaved] = useState(false);
+  const [isUploadingNotes, setIsUploadingNotes] = useState(false);
   const [contextMessages, setContextMessages] = useState<number>(
     user.settings?.contextMessages || 5 // Default: last 5 Q&A pairs
   );
@@ -374,7 +379,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
     companyInfoSummary: user.settings?.companyInfoSummary || '',
     contextMessages: user.settings?.contextMessages || 5,
     cvText: user.settings?.cvText || '',
-    cvSummary: user.settings?.cvSummary || ''
+    cvSummary: user.settings?.cvSummary || '',
+    notesContent: user.settings?.notesContent || ''
   });
   const [transcribedText, setTranscribedText] = useState('');
   const [interimText, setInterimText] = useState(''); // Current interim (not yet final) transcription
@@ -611,6 +617,12 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
           parsedAt: Date.now()
         });
       }
+      if (user.settings.notesContent !== undefined) {
+        setNotesContent(user.settings.notesContent);
+        if (user.settings.notesContent) {
+          localStorage.setItem('isa_notes_content', user.settings.notesContent);
+        }
+      }
     }
     // If no settings, clear localStorage for JD and company to avoid stale defaults
     if (!user?.settings || Object.keys(user.settings).length === 0) {
@@ -646,8 +658,11 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
           companyInfoSummary: s.companyInfoSummary || '',
           contextMessages: s.contextMessages || 5,
           cvText: s.cvText || '',
-          cvSummary: s.cvSummary || ''
+          cvSummary: s.cvSummary || '',
+          notesContent: s.notesContent || ''
         });
+        setNotesContent(s.notesContent || '');
+        if (s.notesContent) localStorage.setItem('isa_notes_content', s.notesContent);
         setContextMessages(s.contextMessages || 5);
         setBasePrompt(s.basePrompt || basePrompt || '');
         setJobDescription(s.jobDescription || jobDescription || '');
@@ -739,7 +754,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         cvSummary: settings.cvSummary || '',
         basePromptSummary: settings.basePromptSummary || '',
         jobDescriptionSummary: settings.jobDescriptionSummary || '',
-        companyInfoSummary: settings.companyInfoSummary || ''
+        companyInfoSummary: settings.companyInfoSummary || '',
+        notesContent
       };
 
       const result = await authClient.updateSettings(user._id, rawSettings);
@@ -753,6 +769,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         if (rawSettings.basePromptSummary) localStorage.setItem('isa_base_prompt_summary', rawSettings.basePromptSummary);
         if (rawSettings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', rawSettings.jobDescriptionSummary);
         if (rawSettings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', rawSettings.companyInfoSummary);
+        if (rawSettings.notesContent) localStorage.setItem('isa_notes_content', rawSettings.notesContent);
         setShowRawKnowledgebaseSaved(true);
         setTimeout(() => setShowRawKnowledgebaseSaved(false), 2500);
       } else {
@@ -785,7 +802,8 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         companyInfoSummary: settings.companyInfoSummary || '',
         contextMessages,
         cvText: resume?.content || settings.cvText || '',
-        cvSummary: settings.cvSummary || ''
+        cvSummary: settings.cvSummary || '',
+        notesContent
       };
 
       const result = await authClient.updateSettings(user._id, updatedSettings);
@@ -801,6 +819,7 @@ const App: React.FC<AppProps> = ({ user, onLogout, onNewSession }) => {
         if (updatedSettings.jobDescriptionSummary) localStorage.setItem('isa_jd_summary', updatedSettings.jobDescriptionSummary);
         if (updatedSettings.companyInfoSummary) localStorage.setItem('isa_company_info_summary', updatedSettings.companyInfoSummary);
         if (updatedSettings.responseLanguage) localStorage.setItem('isa_response_language', updatedSettings.responseLanguage);
+        if (updatedSettings.notesContent) localStorage.setItem('isa_notes_content', updatedSettings.notesContent);
         // Notify other windows (Electron overlay, other browser tabs)
         if (typeof window !== 'undefined' && (window as any).require) {
           const { ipcRenderer } = (window as any).require('electron');
@@ -3108,6 +3127,79 @@ Respond in ${langDisplay}.]`;
                   maxHeight="400px"
                 />
               </CollapsibleSection>
+
+              {/* Notes */}
+              <CollapsibleSection
+                title="Notes"
+                isOptional={true}
+                isFilled={!!(notesContent && notesContent.trim().length > 20)}
+                isProcessed={false}
+                defaultOpen={false}
+              >
+                <div className="space-y-4">
+                  {/* File Upload */}
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:border-yellow-500 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all">
+                    <div className="flex flex-col items-center justify-center pt-4 pb-4">
+                      <svg className="mb-2 h-6 w-6 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="text-xs text-slate-600 dark:text-slate-400"><span className="font-semibold">Upload PDF or DOCX</span> — text will be extracted</p>
+                    </div>
+                    <input type="file" className="hidden" accept=".pdf,.docx,.doc" onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setIsUploadingNotes(true);
+                      try {
+                        const formData = new FormData();
+                        formData.append('document', file);
+                        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'}/api/notes/parse-document`, {
+                          method: 'POST', body: formData
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          setNotesContent(data.text);
+                        }
+                      } catch (err) {
+                        console.error('Failed to parse document:', err);
+                      } finally {
+                        setIsUploadingNotes(false);
+                      }
+                    }} disabled={isUploadingNotes} />
+                  </label>
+                  {isUploadingNotes && <p className="text-xs text-yellow-600 dark:text-yellow-400">Parsing document...</p>}
+
+                  {/* Notes Textarea */}
+                  <AutoExpandTextarea
+                    value={notesContent}
+                    onChange={(e) => setNotesContent(e.target.value)}
+                    placeholder="Paste your notes here... Supports headings, bullets, code blocks, etc."
+                    minHeight="150px"
+                    maxHeight="500px"
+                  />
+
+                  {/* Character Count */}
+                  <div className="text-xs text-slate-500 dark:text-slate-500 text-right">{notesContent.length} characters</div>
+
+                  {/* Save Button */}
+                  <button onClick={async () => {
+                    try {
+                      const saveResult = await authClient.updateSettings(user._id, { notesContent });
+                      if (saveResult?.success) {
+                        localStorage.setItem('isa_notes_content', notesContent);
+                        setShowNotesSaved(true);
+                        setTimeout(() => setShowNotesSaved(false), 2500);
+                      }
+                    } catch (err: any) {
+                      console.error('Failed to save notes:', err);
+                    }
+                  }} className="w-full px-4 py-2.5 rounded-xl font-bold text-sm transition-all duration-200 bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-800/30 text-yellow-700 dark:text-yellow-400 border border-yellow-300 dark:border-yellow-600/50 hover:border-yellow-500">
+                    Save Notes
+                  </button>
+                  {showNotesSaved && (
+                    <div className="text-center text-emerald-500 dark:text-emerald-400 text-xs font-semibold">Notes saved</div>
+                  )}
+                </div>
+              </CollapsibleSection>
             </div>
 
             {/* Right Column: AI Summaries */}
@@ -3331,7 +3423,7 @@ Respond in ${langDisplay}.]`;
                 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(shortcuts)
-              .filter(([action]) => ['toggleOverlay', 'toggleListen', 'analyzeScreen', 'getAnswer', 'focusInput', 'toggleBrowseAI', 'clearQuestion'].includes(action))
+              .filter(([action]) => ['toggleOverlay', 'toggleListen', 'analyzeScreen', 'getAnswer', 'focusInput', 'toggleBrowseAI', 'clearQuestion', 'toggleNotes'].includes(action))
               .map(([action, config]: [string, any]) => (
               <ShortcutRecorder
                 key={action}

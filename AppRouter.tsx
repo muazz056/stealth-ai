@@ -306,7 +306,8 @@ const AppRouterContent: React.FC = () => {
         basePrompt: currentUser.settings?.basePrompt || '',
         responseLanguage: currentUser.settings?.responseLanguage || 'English',
         contextMessages: currentUser.settings?.contextMessages ?? 5,
-        apiKeys: currentUser.settings?.apiKeys || {}
+        apiKeys: currentUser.settings?.apiKeys || {},
+        notesContent: ''
       };
 
       try {
@@ -331,6 +332,7 @@ const AppRouterContent: React.FC = () => {
       localStorage.setItem('isa_job_description', '');
       localStorage.setItem('isa_company_info', '');
       localStorage.removeItem(`isa_providers_sent_context_${currentUser._id}`);
+      localStorage.setItem('isa_notes_content', '');
       setShowSuccessModal(true);
       setTimeout(() => {
         setShowSuccessModal(false);

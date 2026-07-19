@@ -324,6 +324,11 @@ const OverlayApp: React.FC = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [modalInfo, setModalInfo] = useState<{title: string; message: string; variant: 'info' | 'success' | 'error' | 'warning'; icon?: string} | null>(null);
 
+  // Notes state
+  const [showNotes, setShowNotes] = useState(false);
+  const [notesContent, setNotesContent] = useState('');
+  const notesButtonRef = useRef<HTMLButtonElement>(null);
+
   const transcriptionStartTimeRef = useRef<number>(0);
   const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500); // Default, will be updated dynamically
   
@@ -826,6 +831,10 @@ const OverlayApp: React.FC = () => {
         if (s.companyInfo) localStorage.setItem(LS_COMPANY_INFO_KEY, s.companyInfo);
         if (s.basePrompt) localStorage.setItem(LS_BASE_PROMPT_KEY, s.basePrompt);
         if (s.responseLanguage) localStorage.setItem('isa_response_language', s.responseLanguage);
+        if (s.notesContent) {
+          localStorage.setItem('isa_notes_content', s.notesContent);
+          setNotesContent(s.notesContent);
+        }
         console.log(`✅ [Overlay] User settings synced from DB (${source}):`, {
           deepgramLanguage: freshUser.deepgramLanguage,
           deepgramKeyterms: freshUser.deepgramKeyterms,
@@ -912,6 +921,10 @@ const OverlayApp: React.FC = () => {
         console.error('Failed to parse API keys:', e);
       }
     }
+
+    // Load notes from localStorage
+    const savedNotes = localStorage.getItem('isa_notes_content');
+    if (savedNotes) setNotesContent(savedNotes);
 
     // Setup speech recognition (Python Bridge for Electron, Web Speech API for browser)
     const isElectron = typeof window !== 'undefined' && (window as any).require;
@@ -1596,6 +1609,9 @@ const OverlayApp: React.FC = () => {
                 setAiResponse('');
               }
               break;
+            case 'toggleNotes':
+              setShowNotes(prev => !prev);
+              break;
           }
           return;
         }
@@ -2240,6 +2256,7 @@ const OverlayApp: React.FC = () => {
 
   // Get Answer (stop listening + generate)
   const handleGetAnswer = async () => {
+    setShowNotes(false);
     const questionToAnswer = (isListening ? transcribedText : manualTextInput).trim();
 
     if (isListening) {
@@ -3345,7 +3362,7 @@ ${companyInfoSummary}`;
               onClick={_isFree ? undefined : handleToggleBrowseAI}
               disabled={_isFree}
               title={_isFree ? 'BrowseAI is a paid feature. Upgrade to Pro to unlock.' : ''}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all backdrop-blur-sm ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all backdrop-blur-sm ${
   _isFree
     ? 'bg-gray-800/30 text-white border border-gray-700/30 opacity-50 cursor-not-allowed'
     : browserMode && browseAIEnabled
@@ -3354,19 +3371,37 @@ ${companyInfoSummary}`;
 }`}
             >
               {_isFree ? (
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
               ) : (
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                 </svg>
               )}
               <span>BrowseAI</span>
-              <div className={`w-2 h-2 rounded-full ${_isFree ? 'bg-gray-600' : browserMode && browseAIEnabled ? 'bg-white' : 'bg-gray-500'}`}></div>
+              <div className={`w-1.5 h-1.5 rounded-full ${_isFree ? 'bg-gray-600' : browserMode && browseAIEnabled ? 'bg-white' : 'bg-gray-500'}`}></div>
             </button>
           );
         })()}
+
+        {/* Notes Button */}
+        <button
+          ref={notesButtonRef}
+          onClick={() => setShowNotes(!showNotes)}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all backdrop-blur-sm ${
+            showNotes
+              ? 'bg-yellow-500/40 text-white border border-yellow-400/50 shadow-lg shadow-yellow-500/30'
+              : 'bg-gray-700/20 hover:bg-gray-600/30 text-white border border-gray-500/30'
+          }`}
+          title={showNotes ? 'Show Q&A' : 'Show Notes'}
+        >
+          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>Notes</span>
+          <div className={`w-1.5 h-1.5 rounded-full ${notesContent ? 'bg-yellow-400' : 'bg-gray-600'}`}></div>
+        </button>
         
         {/* Action Buttons */}
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
@@ -3632,9 +3667,47 @@ ${companyInfoSummary}`;
         </div>
       )}
 
-      {/* AI Response - Hide when browser is active */}
-      {!browserMode && (aiResponse || isGenerating || isAnalyzing || qaPairs.length > 0) && (
+      {/* AI Response / Notes Display */}
+      {!browserMode && (aiResponse || isGenerating || isAnalyzing || qaPairs.length > 0 || (showNotes && notesContent)) && (
         <div ref={answerAreaRef} className="flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 overflow-y-auto border border-blue-400/20 shadow-inner max-h-[500px]">
+          {showNotes && notesContent ? (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-yellow-300 text-xs font-bold uppercase drop-shadow-lg">Notes</h3>
+                <button
+                  onClick={() => setShowNotes(false)}
+                  className="text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  ✕ Close
+                </button>
+              </div>
+              <div className="markdown-content text-white text-sm leading-relaxed">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+                  rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
+                  components={{
+                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-yellow-300" {...props} />,
+                    h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-yellow-200" {...props} />,
+                    h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-yellow-200" {...props} />,
+                    p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                    ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                    ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                    li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                    code: CodeBlock,
+                    pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                    a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                    strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                    em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                    blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-yellow-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                    hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                  }}
+                >
+                  {notesContent}
+                </ReactMarkdown>
+              </div>
+            </>
+          ) : (
+            <>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-green-300 text-xs font-bold uppercase drop-shadow-lg">
               {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Answer'}
@@ -3720,34 +3793,19 @@ ${companyInfoSummary}`;
                     remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
                     rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
                     components={{
-                      // Headings
                       h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
                       h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
                       h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
-                      
-                      // Paragraphs
                       p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
-                      
-                      // Lists
                       ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
                       ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
                       li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
-                      
-                      // Code blocks
                       code: CodeBlock,
                       pre: ({node, ...props}) => <pre className="my-3" {...props} />,
-                      
-                      // Links
                       a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                      
-                      // Bold, Italic
                       strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
                       em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
-                      
-                      // Blockquote
                       blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
-                      
-                      // Horizontal rule
                       hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
                     }}
                   >
@@ -3762,40 +3820,27 @@ ${companyInfoSummary}`;
                 remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
                 rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
                 components={{
-                  // Headings
                   h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
                   h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
                   h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
-                  
-                  // Paragraphs
                   p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
-                  
-                  // Lists
                   ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
                   ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
                   li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
-                  
-                  // Code blocks
                   code: CodeBlock,
                   pre: ({node, ...props}) => <pre className="my-3" {...props} />,
-                  
-                  // Links
                   a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                  
-                  // Bold, Italic
                   strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
                   em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
-                  
-                  // Blockquote
                   blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
-                  
-                  // Horizontal rule
                   hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
                 }}
               >
                 {aiResponse}
               </ReactMarkdown>
             </div>
+          )}
+            </>
           )}
         </div>
       )}

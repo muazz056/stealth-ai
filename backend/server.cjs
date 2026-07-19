@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const TurndownService = require('turndown');
 
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_change_me_in_production_2024';
@@ -1938,6 +1939,78 @@ app.post('/api/cv/parse', upload.single('cv'), async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to parse CV: ' + error.message
+    });
+  }
+});
+
+// ==================== NOTES DOCUMENT PARSING (Rich Text) ====================
+
+// Parse document and return formatted markdown (preserves headings, bold, italic, lists, etc.)
+app.post('/api/notes/parse-document', upload.single('document'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const { buffer, mimetype } = req.file;
+    let markdown = '';
+
+    if (mimetype === 'application/pdf') {
+      // PDF: extract text with structure hints
+      const pdfData = await pdfParse(buffer);
+      const text = pdfData.text
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      // Try to preserve headings by detecting short all-caps lines
+      const lines = text.split('\n');
+      const formattedLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        if (trimmed.length < 60 && trimmed === trimmed.toUpperCase() && /[A-Z]{3,}/.test(trimmed)) {
+          return `## ${trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase()}`;
+        }
+        return trimmed;
+      });
+      markdown = formattedLines.join('\n\n');
+    } else if (
+      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimetype === 'application/msword'
+    ) {
+      // DOCX: extract HTML with full formatting, then convert to markdown
+      const result = await mammoth.convertToHtml({ buffer });
+      const html = result.value;
+      const turndown = new TurndownService({
+        headingStyle: 'atx',
+        codeBlockStyle: 'fenced'
+      });
+      markdown = turndown.turndown(html);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Unsupported file type. Please upload PDF or DOC/DOCX files.'
+      });
+    }
+
+    markdown = markdown.replace(/\n{4,}/g, '\n\n\n').trim();
+
+    if (!markdown || markdown.length < 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not extract meaningful content from the document.'
+      });
+    }
+
+    res.json({
+      success: true,
+      text: markdown,
+      length: markdown.length
+    });
+  } catch (error) {
+    console.error('❌ Notes document parsing error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to parse document: ' + error.message
     });
   }
 });
