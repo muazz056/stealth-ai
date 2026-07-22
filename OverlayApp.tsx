@@ -1721,23 +1721,24 @@ const OverlayApp: React.FC = () => {
         return;
       }
     }
-    
+
+    // Establish WebSocket immediately (before async capture) so it connects in background
+    const _wsLang = (() => {
+      try { const u = JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); return u.deepgramLanguage || u.settings?.language || 'en-US'; } catch { return 'en-US'; }
+    })();
+    const _wsTerms = (() => {
+      try { const u = JSON.parse(localStorage.getItem(LS_USER_KEY) || '{}'); return u.deepgramKeyterms || ''; } catch { return ''; }
+    })();
+    let earlyWsReady = false;
+    const earlyWs = new WebSocket(
+      `${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(_wsLang)}&keyterms=${encodeURIComponent(_wsTerms)}`
+    );
+    earlyWs.onmessage = (ev) => {
+      try { const d = JSON.parse(ev.data); if (d.type === 'connected') earlyWsReady = true; } catch (_) {}
+    };
+    earlyWs.onerror = () => {};
+
     const startDeepgramRecorder = async (stream: MediaStream, language: string, keyterms: string) => {
-      // Clean up any previous capture session before starting a new one
-      if (deepgramWsRef.current) {
-        try { deepgramWsRef.current.close(); } catch (e) {}
-        deepgramWsRef.current = null;
-      }
-      if (mediaRecorderRef.current) {
-        try {
-          mediaRecorderRef.current.ondataavailable = null;
-          mediaRecorderRef.current.onstop = null;
-          if (mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-          }
-        } catch (e) {}
-        mediaRecorderRef.current = null;
-      }
       if (deepgramAudioRef.current) {
         try { deepgramAudioRef.current.getTracks().forEach((track) => track.stop()); } catch (e) {}
         deepgramAudioRef.current = null;
@@ -1754,19 +1755,27 @@ const OverlayApp: React.FC = () => {
         : new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
       mediaRecorderRef.current = mediaRecorder;
 
+      // Use early WS if still usable, otherwise create fresh
+      if (deepgramWsRef.current && deepgramWsRef.current !== earlyWs) {
+        try { deepgramWsRef.current.close(); } catch (e) {}
+        deepgramWsRef.current = null;
+      }
+      const ws = earlyWs.readyState <= WebSocket.OPEN
+        ? earlyWs
+        : new WebSocket(
+            `${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(language || 'en-US')}&keyterms=${encodeURIComponent(keyterms || '')}`
+          );
+      deepgramWsRef.current = ws;
+
       // Start recorder immediately so audio chunks are buffered while WS connects
       overlayLog('Starting MediaRecorder immediately (parallel with WS connect)');
       mediaRecorder.start(100);
 
-      const ws = new WebSocket(
-        `${API_BASE_URL}/api/deepgram-ws?language=${encodeURIComponent(language || 'en-US')}&keyterms=${encodeURIComponent(keyterms || '')}`
-      );
-      deepgramWsRef.current = ws;
-
       let chunkCount = 0;
       let byteCount = 0;
-      let deepgramReady = false;
-      const pendingChunks: any[] = [];
+      let deepgramReady = earlyWsReady;
+      if (deepgramReady) overlayLog('Deepgram already connected (early WS)');
+      let pendingChunks: any[] = [];
       
       mediaRecorder.ondataavailable = (ev) => {
         if (ev.data.size > 0) {
@@ -2029,6 +2038,7 @@ const OverlayApp: React.FC = () => {
           } catch (captureErr) {
             overlayLog('System audio capture unavailable in Electron', String(captureErr));
             console.error('❌ System audio capture unavailable in Electron:', captureErr);
+            try { earlyWs.close(); } catch (_) {}
             setIsListening(false);
             isStartedRef.current = false;
             setAiResponse(
@@ -2038,6 +2048,7 @@ const OverlayApp: React.FC = () => {
           }
 
           if (!stream) {
+            try { earlyWs.close(); } catch (_) {}
             throw new Error('No stream available');
           }
 
@@ -2052,6 +2063,7 @@ const OverlayApp: React.FC = () => {
           setIsListening(false);
           isStartedRef.current = false;
           setAiResponse('Failed to start Electron system-audio streaming to Deepgram. No mic fallback was used.');
+          try { earlyWs.close(); } catch (_) {}
           return;
         }
       }
@@ -3672,23 +3684,64 @@ ${companyInfoSummary}`;
         <div ref={answerAreaRef} className="flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 overflow-y-auto border border-blue-400/20 shadow-inner max-h-[500px]">
           {showNotes && notesContent ? (
             <>
-              <div className="flex items-center justify-between mb-3">
+              <div className="mb-3">
                 <h3 className="text-yellow-300 text-xs font-bold uppercase drop-shadow-lg">Notes</h3>
-                <button
-                  onClick={() => setShowNotes(false)}
-                  className="text-xs text-gray-400 hover:text-white transition-colors"
-                >
-                  ✕ Close
-                </button>
               </div>
+              {(() => {
+                const stripMd = (s: string) => s
+                  .replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')
+                  .replace(/__(.*?)__/g, '$1').replace(/_(.*?)_/g, '$1')
+                  .replace(/`(.*?)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+                const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                const headings = notesContent.split('\n').filter(l => /^#{1,6}\s/.test(l));
+                if (headings.length === 0) return null;
+                return (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {headings.map((h, i) => {
+                      const text = h.replace(/^#+\s+/, '').trim();
+                      const id = `notes-h-${slug(stripMd(text))}`;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const el = document.getElementById(id);
+                            const container = answerAreaRef.current;
+                            if (el && container) {
+                              container.scrollTop += el.getBoundingClientRect().top - container.getBoundingClientRect().top - 10;
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded-full bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 text-[10px] font-semibold transition-all border border-yellow-500/30 cursor-pointer"
+                        >
+                          {text}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               <div className="markdown-content text-white text-sm leading-relaxed">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
                   rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]}
                   components={{
-                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-yellow-300" {...props} />,
-                    h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-yellow-200" {...props} />,
-                    h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-yellow-200" {...props} />,
+                    h1: ({node, children, ...props}) => {
+                      const text = React.Children.toArray(children).join('');
+                      const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+                      return <h1 id={id} className="text-2xl font-bold mb-3 mt-4 text-yellow-300 scroll-mt-4" {...props}>{children}</h1>;
+                    },
+                    h2: ({node, children, ...props}) => {
+                      const text = React.Children.toArray(children).join('');
+                      const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+                      return <h2 id={id} className="text-xl font-bold mb-2 mt-3 text-yellow-200 scroll-mt-4" {...props}>{children}</h2>;
+                    },
+                    h3: ({node, children, ...props}) => {
+                      const text = React.Children.toArray(children).join('');
+                      const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+                      return <h3 id={id} className="text-lg font-bold mb-2 mt-3 text-yellow-200 scroll-mt-4" {...props}>{children}</h3>;
+                    },
                     p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
                     ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
                     ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,

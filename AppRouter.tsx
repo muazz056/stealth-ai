@@ -300,13 +300,6 @@ const AppRouterContent: React.FC = () => {
         companyInfo: '',
         jobDescriptionSummary: '',
         companyInfoSummary: '',
-        cvSummary: currentUser.settings?.cvSummary || '',
-        basePromptSummary: currentUser.settings?.basePromptSummary || '',
-        cvText: currentUser.settings?.cvText || '',
-        basePrompt: currentUser.settings?.basePrompt || '',
-        responseLanguage: currentUser.settings?.responseLanguage || 'English',
-        contextMessages: currentUser.settings?.contextMessages ?? 5,
-        apiKeys: currentUser.settings?.apiKeys || {},
         notesContent: ''
       };
 
