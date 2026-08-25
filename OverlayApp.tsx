@@ -326,8 +326,10 @@ const OverlayApp: React.FC = () => {
 
   // Notes state
   const [showNotes, setShowNotes] = useState(false);
+  const [splitView, setSplitView] = useState(false);
   const [notesContent, setNotesContent] = useState('');
   const notesButtonRef = useRef<HTMLButtonElement>(null);
+  const splitNotesScrollRef = useRef<HTMLDivElement>(null);
 
   const transcriptionStartTimeRef = useRef<number>(0);
   const [transcriptionSecondsRemaining, setTranscriptionSecondsRemaining] = useState<number>(1500); // Default, will be updated dynamically
@@ -2268,7 +2270,10 @@ const OverlayApp: React.FC = () => {
 
   // Get Answer (stop listening + generate)
   const handleGetAnswer = async () => {
-    setShowNotes(false);
+    if (!splitView) {
+      setShowNotes(false);
+      setSplitView(false);
+    }
     const questionToAnswer = (isListening ? transcribedText : manualTextInput).trim();
 
     if (isListening) {
@@ -3400,7 +3405,7 @@ ${companyInfoSummary}`;
         {/* Notes Button */}
         <button
           ref={notesButtonRef}
-          onClick={() => setShowNotes(!showNotes)}
+          onClick={() => { setShowNotes(!showNotes); if (showNotes) setSplitView(false); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all backdrop-blur-sm ${
             showNotes
               ? 'bg-yellow-500/40 text-white border border-yellow-400/50 shadow-lg shadow-yellow-500/30'
@@ -3414,6 +3419,22 @@ ${companyInfoSummary}`;
           <span>Notes</span>
           <div className={`w-1.5 h-1.5 rounded-full ${notesContent ? 'bg-yellow-400' : 'bg-gray-600'}`}></div>
         </button>
+
+        {/* Split Button */}
+        <button
+          onClick={() => { if (!showNotes) setShowNotes(true); setSplitView(prev => !prev); }}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all backdrop-blur-sm ${
+            splitView && showNotes
+              ? 'bg-purple-500/40 text-white border border-purple-400/50 shadow-lg shadow-purple-500/30'
+              : 'bg-gray-700/20 hover:bg-gray-600/30 text-white border border-gray-500/30'
+          }`}
+          title="Split view: Q&A + Notes side by side"
+        >
+          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+          </svg>
+          <span>Split</span>
+        </button>
         
         {/* Action Buttons */}
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
@@ -3424,9 +3445,9 @@ ${companyInfoSummary}`;
               setLanguageModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
+            className="group flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
             </svg>
             Language
@@ -3439,9 +3460,9 @@ ${companyInfoSummary}`;
               setKeywordsModalOpen(true);
               hideBrowserForModal();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
+            className="group flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase transition-all shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/50"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
             Keywords
@@ -3452,7 +3473,7 @@ ${companyInfoSummary}`;
           <button
             onClick={handleAnalyzeScreen}
             disabled={isAnalyzing || isGenerating}
-            className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all shadow-md ${
+            className={`group flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase transition-all shadow-md ${
               isAnalyzing 
                 ? 'bg-purple-600/70 text-white animate-pulse' 
                 : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-500/50'
@@ -3460,12 +3481,12 @@ ${companyInfoSummary}`;
             data-action="analyze-screen"
           >
             {isAnalyzing ? (
-              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-2.5 h-2.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
             ) : (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
@@ -3473,24 +3494,26 @@ ${companyInfoSummary}`;
             {isAnalyzing ? 'Analyzing...' : 'Analyze'}
           </button>
           
-          <button
-            onClick={handleStopResponse}
-            disabled={!isGenerating && !isAnalyzing}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase transition-all border ${
-              isGenerating || isAnalyzing 
-                ? 'bg-amber-500/20 text-white hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
-                : 'bg-gray-800/50 text-white border-gray-700/30 cursor-not-allowed'
-            }`}
-          >
-            Stop
-          </button>
-          
-          <button 
-            onClick={handleClear} 
-            className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
-          >
-            Clear
-          </button>
+          <div className="flex flex-col gap-0.5">
+            <button
+              onClick={handleStopResponse}
+              disabled={!isGenerating && !isAnalyzing}
+              className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
+                isGenerating || isAnalyzing 
+                  ? 'bg-amber-500/20 text-white hover:bg-amber-500/30 border-amber-500/50 shadow-amber-500/30' 
+                  : 'bg-gray-800/50 text-white border-gray-700/30 cursor-not-allowed'
+              }`}
+            >
+              Stop
+            </button>
+            
+            <button 
+              onClick={handleClear} 
+              className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all bg-gray-700/50 hover:bg-red-600/30 text-white hover:text-red-300 border border-gray-600/30 hover:border-red-500/50"
+            >
+              Clear
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3681,11 +3704,178 @@ ${companyInfoSummary}`;
 
       {/* AI Response / Notes Display */}
       {!browserMode && (aiResponse || isGenerating || isAnalyzing || qaPairs.length > 0 || (showNotes && notesContent)) && (
-        <div ref={answerAreaRef} className="flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 overflow-y-auto border border-blue-400/20 shadow-inner max-h-[500px]">
-          {showNotes && notesContent ? (
+        <div ref={answerAreaRef} className={`flex-1 bg-gray-800/15 backdrop-blur-xl rounded-lg p-4 ${splitView && showNotes && notesContent ? 'overflow-hidden' : 'overflow-y-auto'} border border-blue-400/20 shadow-inner max-h-[500px]`}>
+          {splitView && showNotes && notesContent ? (
+            <div className="flex gap-3 h-full">
+              {/* Q&A Left Side */}
+              <div className="flex-1 min-w-0 overflow-y-auto pr-2 border-r border-gray-600/30">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-green-300 text-xs font-bold uppercase drop-shadow-lg">
+                    {qaPairs.length > 0 ? `Q&A (${currentPairIndex + 1}/${qaPairs.length})` : 'AI Answer'}
+                  </h3>
+                  {qaPairs.length > 1 && !isGenerating && !isAnalyzing && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setCurrentPairIndex(Math.max(0, currentPairIndex - 1))}
+                        disabled={currentPairIndex === 0}
+                        className={`px-2 py-1 text-xs rounded-lg transition-all backdrop-blur-sm border ${
+                          currentPairIndex === 0
+                            ? 'bg-gray-700/20 text-gray-500 cursor-not-allowed border-gray-600/20'
+                            : 'bg-blue-500/30 hover:bg-blue-500/50 text-white border-blue-400/40'
+                        }`}
+                      >
+                        ← Prev
+                      </button>
+                      <button
+                        onClick={() => setCurrentPairIndex(Math.min(qaPairs.length - 1, currentPairIndex + 1))}
+                        disabled={currentPairIndex === qaPairs.length - 1}
+                        className={`px-2 py-1 text-xs rounded-lg transition-all backdrop-blur-sm border ${
+                          currentPairIndex === qaPairs.length - 1
+                            ? 'bg-gray-700/20 text-gray-500 cursor-not-allowed border-gray-600/20'
+                            : 'bg-blue-500/30 hover:bg-blue-500/50 text-white border-blue-400/40'
+                        }`}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {isGenerating || isAnalyzing ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-gray-400">
+                      <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                      {isAnalyzing ? 'Analyzing screen...' : 'Generating...'}
+                    </div>
+                    {aiResponse && (
+                      <div className="markdown-content text-white text-sm leading-relaxed">
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]} rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]} components={{
+                          h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
+                          h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
+                          h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
+                          p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                          ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                          ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                          li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                          code: CodeBlock,
+                          pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                          a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                          strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                          em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                          blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                          hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                        }}>{aiResponse}</ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                ) : qaPairs.length > 0 && qaPairs[currentPairIndex] ? (
+                  <div className="space-y-3">
+                    <div className="bg-blue-500/10 border border-blue-400/30 rounded-lg p-3 backdrop-blur-sm">
+                      <div className="text-xs text-blue-300 uppercase tracking-wide mb-1.5 drop-shadow">Question</div>
+                      <div className="text-white font-bold text-sm leading-relaxed drop-shadow-lg">{qaPairs[currentPairIndex].question}</div>
+                    </div>
+                    <div className="bg-green-500/10 border border-green-400/30 rounded-lg p-3 backdrop-blur-sm">
+                      <div className="text-xs text-green-300 uppercase tracking-wide mb-1.5 drop-shadow">Answer</div>
+                      <div className="markdown-content text-white text-sm leading-relaxed drop-shadow-lg">
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]} rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]} components={{
+                          h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
+                          h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
+                          h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
+                          p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                          ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                          ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                          li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                          code: CodeBlock,
+                          pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                          a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                          strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                          em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                          blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                          hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                        }}>{qaPairs[currentPairIndex].answer}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="markdown-content text-white text-sm leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]} rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]} components={{
+                      h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-3 mt-4 text-white" {...props} />,
+                      h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-2 mt-3 text-white" {...props} />,
+                      h3: ({node, ...props}) => <h3 className="text-lg font-bold mb-2 mt-3 text-white" {...props} />,
+                      p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                      ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                      ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                      li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                      code: CodeBlock,
+                      pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                      a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                      strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                      em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                      blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                      hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                    }}>{aiResponse}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+              {/* Notes Right Side */}
+              <div ref={splitNotesScrollRef} className="flex-1 min-w-0 overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-yellow-300 text-xs font-bold uppercase drop-shadow-lg">Notes</h3>
+                </div>
+                <div className="sticky top-0 z-10 flex justify-end mb-1">
+                  <button type="button" onClick={() => splitNotesScrollRef.current?.scrollTo({ top: 0 })} className="px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 border border-yellow-500/30 transition-all">↑ Top</button>
+                </div>
+                {(() => {
+                  const stripMd = (s: string) => s.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/__(.*?)__/g, '$1').replace(/_(.*?)_/g, '$1').replace(/`(.*?)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+                  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                  const headings = notesContent.split('\n').filter(l => /^#{1,6}\s/.test(l));
+                  if (headings.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {headings.map((h, i) => {
+                        const text = h.replace(/^#+\s+/, '').trim();
+                        const id = `notes-h-${slug(stripMd(text))}`;
+                        return (
+                          <button key={i} type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const el = document.getElementById(id); const container = splitNotesScrollRef.current; if (el && container) { container.scrollTop += el.getBoundingClientRect().top - container.getBoundingClientRect().top - 10; } }} className="px-2 py-0.5 rounded-full bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 text-[10px] font-semibold transition-all border border-yellow-500/30 cursor-pointer">
+                            {text}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                <div className="markdown-content text-white text-sm leading-relaxed">
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]} rehypePlugins={[rehypeKatex, rehypeHighlight, rehypeRaw]} components={{
+                    h1: ({node, children, ...props}) => { const text = React.Children.toArray(children).join(''); const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`; return <h1 id={id} className="text-2xl font-bold mb-3 mt-4 text-yellow-300 scroll-mt-4" {...props}>{children}</h1>; },
+                    h2: ({node, children, ...props}) => { const text = React.Children.toArray(children).join(''); const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`; return <h2 id={id} className="text-xl font-bold mb-2 mt-3 text-yellow-200 scroll-mt-4" {...props}>{children}</h2>; },
+                    h3: ({node, children, ...props}) => { const text = React.Children.toArray(children).join(''); const id = `notes-h-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`; return <h3 id={id} className="text-lg font-bold mb-2 mt-3 text-yellow-200 scroll-mt-4" {...props}>{children}</h3>; },
+                    p: ({node, ...props}) => <p className="mb-3 text-gray-100" {...props} />,
+                    ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                    ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 space-y-1 text-gray-100" {...props} />,
+                    li: ({node, ...props}) => <li className="ml-2 text-gray-100" {...props} />,
+                    code: CodeBlock,
+                    pre: ({node, ...props}) => <pre className="my-3" {...props} />,
+                    a: ({node, ...props}) => <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                    strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
+                    em: ({node, ...props}) => <em className="italic text-gray-200" {...props} />,
+                    blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-yellow-600 pl-4 my-3 text-gray-300 italic" {...props} />,
+                    hr: ({node, ...props}) => <hr className="my-4 border-gray-700" {...props} />,
+                  }}>{notesContent}</ReactMarkdown>
+                </div>
+              </div>
+            </div>
+          ) : showNotes && notesContent ? (
             <>
-              <div className="mb-3">
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="text-yellow-300 text-xs font-bold uppercase drop-shadow-lg">Notes</h3>
+              </div>
+              <div className="sticky top-0 z-10 flex justify-end mb-1">
+                <button
+                  type="button"
+                  onClick={() => answerAreaRef.current?.scrollTo({ top: 0 })}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 border border-yellow-500/30 transition-all"
+                >
+                  ↑ Top
+                </button>
               </div>
               {(() => {
                 const stripMd = (s: string) => s
