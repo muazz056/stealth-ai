@@ -25,14 +25,44 @@ app.on('second-instance', () => {
     }
 });
 
-// Backend URL: Check VITE_BACKEND_URL (build-time/Vercel), then API_BACKEND_URL.
-// In dev (unpackaged) use localhost. In packaged use Railway (app has no bundled backend).
-const BACKEND_URL = process.env.VITE_BACKEND_URL || process.env.API_BACKEND_URL || (app.isPackaged ? 'https://stealth-ai-production-bcbd.up.railway.app' : 'http://localhost:3001');
+// Backend URL: Read from .env at runtime (packaged apps don't have Vite env vars),
+// then process.env, then fallback to production Railway URL, then localhost.
+function readEnvValue(key) {
+  try {
+    const possiblePaths = [
+      path.join(__dirname, '.env'),
+      path.join(process.resourcesPath, 'app', '.env'),
+      path.join(process.resourcesPath, '.env'),
+      path.join(path.dirname(app.getPath('exe')), '.env'),
+    ];
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf-8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx === -1) continue;
+          const k = trimmed.slice(0, eqIdx).trim();
+          const v = trimmed.slice(eqIdx + 1).trim();
+          if (k === key && v) return v;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Failed to read .env for', key, e.message);
+  }
+  return null;
+}
+
+const BACKEND_URL = readEnvValue('VITE_BACKEND_URL')
+  || readEnvValue('API_BACKEND_URL')
+  || process.env.VITE_BACKEND_URL
+  || process.env.API_BACKEND_URL
+  || (app.isPackaged ? 'https://stealth-ai-production-2dea.up.railway.app' : 'http://localhost:3001');
 
 console.log('🔧 Backend URL:', BACKEND_URL);
 console.log('🔧 Is packaged:', app.isPackaged);
-console.log('🔧 VITE_BACKEND_URL:', process.env.VITE_BACKEND_URL);
-console.log('🔧 API_BACKEND_URL:', process.env.API_BACKEND_URL);
 
 // App icon: use the 512x512 stealth logo as primary app icon.
 // For packaged builds, the icon PNG may be in several locations depending on
@@ -181,7 +211,16 @@ function startPythonBridge() {
         
         // Handle Python stderr (errors)
         pythonProcess.stderr.on('data', (data) => {
-            console.error('🐍 Python error:', data.toString());
+            const errorMsg = data.toString().trim();
+            console.error('🐍 Python error:', errorMsg);
+            // Forward error to renderers so user sees actual error
+            const errorPayload = { type: 'error', message: errorMsg };
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('python-speech', errorPayload);
+            }
+            if (overlayWindow && !overlayWindow.isDestroyed()) {
+                overlayWindow.webContents.send('python-speech', errorPayload);
+            }
         });
         
         // Handle Python process exit
@@ -189,6 +228,15 @@ function startPythonBridge() {
             console.log(`🐍 Python bridge exited with code ${code}`);
             pythonProcess = null;
             pythonReady = false;
+            if (code !== 0 && code !== null) {
+                const exitPayload = { type: 'error', message: `Python bridge crashed (exit code ${code}). Check that Python and required packages (pyaudio, websockets, speech_recognition) are installed.` };
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('python-speech', exitPayload);
+                }
+                if (overlayWindow && !overlayWindow.isDestroyed()) {
+                    overlayWindow.webContents.send('python-speech', exitPayload);
+                }
+            }
         });
         
         // Handle spawn errors
@@ -196,6 +244,13 @@ function startPythonBridge() {
             console.error('❌ Failed to start Python bridge:', error.message);
             pythonProcess = null;
             pythonReady = false;
+            const spawnPayload = { type: 'error', message: `Cannot start Python bridge: ${error.message}. Ensure Python is installed and on PATH.` };
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('python-speech', spawnPayload);
+            }
+            if (overlayWindow && !overlayWindow.isDestroyed()) {
+                overlayWindow.webContents.send('python-speech', spawnPayload);
+            }
         });
         
     } catch (error) {
@@ -301,6 +356,13 @@ function startDeepgramBridge(apiKey, lang, keyterms = '') {
             const errorMsg = data.toString().trim();
             if (!errorMsg.includes('EPIPE')) {
                 console.error('🎤 Deepgram error:', errorMsg);
+                const errorPayload = { type: 'error', message: errorMsg };
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('python-speech', errorPayload);
+                }
+                if (overlayWindow && !overlayWindow.isDestroyed()) {
+                    overlayWindow.webContents.send('python-speech', errorPayload);
+                }
             }
         });
         
@@ -312,6 +374,13 @@ function startDeepgramBridge(apiKey, lang, keyterms = '') {
             if (deepgramProcess && deepgramProcess.pid === thisPid) {
                 if (code !== 0 && code !== null) {
                     console.error('❌ Deepgram bridge crashed');
+                    const exitPayload = { type: 'error', message: `Deepgram bridge crashed (exit code ${code}). Check that Python and required packages (pyaudio, websockets) are installed.` };
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('python-speech', exitPayload);
+                    }
+                    if (overlayWindow && !overlayWindow.isDestroyed()) {
+                        overlayWindow.webContents.send('python-speech', exitPayload);
+                    }
                 }
                 deepgramProcess = null;
                 deepgramReady = false;
@@ -324,6 +393,13 @@ function startDeepgramBridge(apiKey, lang, keyterms = '') {
         deepgramProcess.on('error', (error) => {
             if (error.code !== 'EPIPE') {
                 console.error('❌ Failed to start Deepgram bridge:', error.message);
+                const spawnPayload = { type: 'error', message: `Cannot start Deepgram bridge: ${error.message}. Ensure Python is installed and on PATH.` };
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('python-speech', spawnPayload);
+                }
+                if (overlayWindow && !overlayWindow.isDestroyed()) {
+                    overlayWindow.webContents.send('python-speech', spawnPayload);
+                }
             }
             if (deepgramProcess && deepgramProcess.pid === thisPid) {
                 deepgramProcess = null;

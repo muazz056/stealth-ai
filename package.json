@@ -102,6 +102,7 @@
       "speech_bridge.py",
       "deepgram_speech_bridge.py",
       "deepgram_bridge.cjs",
+      ".env",
       "node_modules/**/*",
       "!node_modules/ffi-napi/**/*",
       "!node_modules/ref-napi/**/*",
